@@ -228,6 +228,35 @@ internal static class ProposalTests
     }
 
     [Test]
+    private static void WindowsCancellationKeepsCapturedTokenValidUntilAsyncCompletion()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Tests")) return;
+
+        var windows = Assembly.Load("Meltype");
+        var type = windows.GetType("Meltype.Composition.ProposalPendingRequest")
+            ?? throw new AssertionException("ProposalPendingRequest が見つからない");
+        var pending = Activator.CreateInstance(type, nonPublic: true)
+            ?? throw new AssertionException("ProposalPendingRequest を作れない");
+        var token = (CancellationToken)type.GetProperty("Token")!.GetValue(pending)!;
+        var cancel = type.GetMethod("Cancel")!;
+        var complete = type.GetMethod("Complete")!;
+        var cancelled = type.GetProperty("IsCancelled")!;
+
+        // 旧実装の競合: manager がcancelした後にHTTP continuationが次のawait用tokenを使う。
+        // tokenは生成時に一度だけ捕捉し、cancelはsourceをdisposeしないので継続側で安全に参照できる。
+        cancel.Invoke(pending, null);
+        Assert.True(token.IsCancellationRequested, "cancel後も捕捉済みtokenで取消を観測できる");
+        Assert.True((bool)cancelled.GetValue(pending)!, "queued UI callbackも取消を観測できる");
+
+        // async finallyだけがsourceをdisposeする。完了後に遅いcancelが競合してもdisposed sourceへCancelしない。
+        complete.Invoke(pending, null);
+        cancel.Invoke(pending, null);
+        complete.Invoke(pending, null);
+        Assert.True((bool)cancelled.GetValue(pending)!, "cancel/complete競合をidempotentに閉じる");
+    }
+
+    [Test]
     private static void NoPortPreservesNativeComposition()
     {
         var keyboard = new CompositionTests.Keyboard();

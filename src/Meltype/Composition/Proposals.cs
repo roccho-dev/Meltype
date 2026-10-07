@@ -25,6 +25,43 @@ internal readonly record struct ProposalTarget(
     }
 }
 
+internal sealed class ProposalPendingRequest
+{
+    private readonly object _gate = new();
+    private readonly CancellationTokenSource _source = new();
+    private bool _completed;
+    private int _cancelled;
+
+    public ProposalPendingRequest()
+    {
+        // Capture once while the source is alive. Async continuations never re-read CancellationTokenSource.Token.
+        Token = _source.Token;
+    }
+
+    public CancellationToken Token { get; }
+    public bool IsCancelled => Volatile.Read(ref _cancelled) != 0;
+
+    public void Cancel()
+    {
+        Interlocked.Exchange(ref _cancelled, 1);
+        lock (_gate)
+        {
+            // Complete may already have disposed the source. The flag still suppresses a queued UI callback.
+            if (!_completed) _source.Cancel();
+        }
+    }
+
+    public void Complete()
+    {
+        lock (_gate)
+        {
+            if (_completed) return;
+            _completed = true;
+            _source.Dispose();
+        }
+    }
+}
+
 internal sealed class ProposalTargetLease
 {
     private long _generation;
@@ -74,8 +111,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     private readonly Func<ProposalTarget?> _currentTarget;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly ProposalTargetLease _target = new();
-    private CancellationTokenSource? _pending;
-    private long _pendingGeneration;
+    private ProposalPendingRequest? _pending;
 
     private ProposalHttpPort(Control invoker, Uri endpoint, Func<ProposalTarget?> currentTarget)
     {
@@ -107,16 +143,16 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
             return;
         }
         _target.Bind(query.Generation, target);
-        var cancellation = new CancellationTokenSource();
-        _pending = cancellation;
-        _pendingGeneration = query.Generation;
-        _ = Send(query, receive, cancellation);
+        var pending = new ProposalPendingRequest();
+        var previous = Interlocked.Exchange(ref _pending, pending);
+        previous?.Cancel();
+        _ = Send(query, receive, pending);
     }
 
     public void Cancel(long generation)
     {
         _target.Clear(generation);
-        if (_pendingGeneration == generation) CancelPending();
+        CancelPending();
     }
 
     public bool CanApply(ProposalSelection selection) =>
@@ -129,34 +165,40 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
         Cancel(generation);
     }
 
-    private async Task Send(ProposalQuery query, Action<ProposalResponse> receive, CancellationTokenSource cancellation)
+    private async Task Send(ProposalQuery query, Action<ProposalResponse> receive, ProposalPendingRequest pending)
     {
+        var token = pending.Token;
         try
         {
             using var response = await _http.PostAsJsonAsync(_endpoint,
-                new { generation = query.Generation, raw = query.Raw }, cancellation.Token);
+                new { generation = query.Generation, raw = query.Raw }, token);
             if (!response.IsSuccessStatusCode)
             {
-                Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], $"HTTP_{(int)response.StatusCode}"));
+                Deliver(query, receive, pending, new ProposalResponse(query.Generation, query.Raw, [], $"HTTP_{(int)response.StatusCode}"));
                 return;
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellation.Token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellation.Token);
-            Deliver(query, receive, cancellation, ParseResponse(query, document.RootElement));
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+            Deliver(query, receive, pending, ParseResponse(query, document.RootElement));
         }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (TaskCanceledException)
         {
-            Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "TIMEOUT"));
+            Deliver(query, receive, pending, new ProposalResponse(query.Generation, query.Raw, [], "TIMEOUT"));
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
         {
-            Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE"));
+            Deliver(query, receive, pending, new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE"));
         }
         catch (HttpRequestException)
         {
-            Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "UNAVAILABLE"));
+            Deliver(query, receive, pending, new ProposalResponse(query.Generation, query.Raw, [], "UNAVAILABLE"));
+        }
+        catch (ObjectDisposedException) when (pending.IsCancelled) { }
+        finally
+        {
+            FinishPending(pending);
         }
     }
 
@@ -199,34 +241,27 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
         return new ProposalResponse(query.Generation, query.Raw, proposals);
     }
 
-    private void Deliver(ProposalQuery query, Action<ProposalResponse> receive, CancellationTokenSource cancellation, ProposalResponse response)
+    private void Deliver(ProposalQuery query, Action<ProposalResponse> receive, ProposalPendingRequest pending, ProposalResponse response)
     {
-        if (cancellation.IsCancellationRequested || !_invoker.IsHandleCreated || _invoker.IsDisposed) return;
+        if (pending.IsCancelled || !_invoker.IsHandleCreated || _invoker.IsDisposed) return;
         _invoker.BeginInvoke(() =>
         {
-            if (cancellation.IsCancellationRequested) return;
-            FinishPending(query.Generation, cancellation);
+            if (pending.IsCancelled) return;
             _target.Complete(query.Generation, response);
             receive(response);
         });
     }
 
-    private void FinishPending(long generation, CancellationTokenSource cancellation)
+    private void FinishPending(ProposalPendingRequest pending)
     {
-        if (_pendingGeneration != generation || !ReferenceEquals(_pending, cancellation)) return;
-        _pending = null;
-        _pendingGeneration = 0;
-        cancellation.Dispose();
+        Interlocked.CompareExchange(ref _pending, null, pending);
+        pending.Complete();
     }
 
     private void CancelPending()
     {
-        var pending = _pending;
-        _pending = null;
-        _pendingGeneration = 0;
-        if (pending is null) return;
-        pending.Cancel();
-        pending.Dispose();
+        var pending = Interlocked.Exchange(ref _pending, null);
+        pending?.Cancel();
     }
 
     public void Dispose()
