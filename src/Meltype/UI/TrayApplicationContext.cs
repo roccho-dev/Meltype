@@ -27,6 +27,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _levelItem;
     private readonly ToolStripMenuItem _profileItem;
     private readonly Composition.CompositionService _composition;
+    private readonly Composition.ProposalHttpPort? _proposals;
     private SettingsForm? _settingsForm;
     private LogForm? _logForm;
     private UserDictionaryForm? _dictionaryForm;
@@ -62,6 +63,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Placement = () => _engine.Settings.CompositionPlacement,
             Size = () => _engine.Settings.CompositionSize,
         });
+        _proposals = Composition.ProposalHttpPort.FromEnvironment(_invoker, () => _composition.Focus.CanCapture);
+        if (_proposals is not null) _composition.Controller.AttachProposals(_proposals);
         _engine.AttachComposition(_composition);
 
         var menu = new ContextMenuStrip();
@@ -521,6 +524,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _engine.StatusChanged -= OnEngineStatusChanged;
         _engine.ToggleRequested -= OnToggleRequested;
         _engine.ImeSuggested -= OnImeSuggested;
+        _composition.Controller.AttachProposals(null);
+        _proposals?.Dispose();
         _engine.DetachComposition();
         _composition.Dispose();
         _settingsForm?.Close();

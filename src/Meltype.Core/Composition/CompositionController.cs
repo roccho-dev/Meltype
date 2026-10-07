@@ -201,6 +201,8 @@ public sealed class CompositionController
     private long _lastCommitTime = long.MinValue / 2;
     private int _compositionId;
     private ReconversionSelection? _reconversion;
+    private IProposalPort? _proposalPort;
+    private ProposalSession? _proposalSession;
 
     // 英数状態で判定中の語。打鍵はすぐアプリに送り (待たせない)、ローマ字と分かったら消して変換ボックスに入れ直す。
     private readonly StringBuilder _heldLetters = new();
@@ -255,6 +257,16 @@ public sealed class CompositionController
     /// <summary>選択範囲を置換した。入力先の行を読み直すための通知。</summary>
     public event Action? ReconversionCommitted;
 
+    /// <summary>任意の意味 Proposal 入力を取り付ける。null で外し、既存入力だけの挙動へ戻す。</summary>
+    public void AttachProposals(IProposalPort? port)
+    {
+        if (ReferenceEquals(_proposalPort, port)) return;
+        CancelProposals();
+        _proposalPort = port;
+        _proposalSession = port is null ? null : new ProposalSession();
+        UpdateView();
+    }
+
     /// <summary>キューにたまった入力をすべて処理する。UI スレッドで呼ぶ。</summary>
     public void Pump()
     {
@@ -265,6 +277,7 @@ public sealed class CompositionController
                 if (input.Key is { } key) HandleKey(key);
                 else if (input.Mouse is { } mouse) HandleMouse(mouse);
             }
+            SyncProposals();
             UpdateView();
             if (IsComposing) return;
             // 読みをすべて削除した場合も、元の選択範囲は置換せず再変換を終了する。
@@ -292,6 +305,11 @@ public sealed class CompositionController
     /// <summary>変換中の文節の候補を番号で選ぶ (Mac の候補ウィンドウをクリックしたときなど)。</summary>
     public void SelectCandidate(int index)
     {
+        if (!_converting && _proposalSession?.SetSelected(index) == true)
+        {
+            UpdateView();
+            return;
+        }
         if (!_converting || _clauses.Count == 0) return;
         var clause = _clauses[_selectedClause];
         if (index < 0 || index >= clause.Candidates.Count) return;
@@ -305,6 +323,7 @@ public sealed class CompositionController
     {
         if (_heldLetters.Length > 0) ReleaseHeldAsEnglish();
         CommitIfAny();
+        SyncProposals();
         UpdateView();
     }
 
@@ -327,6 +346,7 @@ public sealed class CompositionController
     /// <summary>例外からの復旧用。未確定の内容と追跡中の状態をすべて捨てる (次の入力で同じ例外を繰り返さないように)。</summary>
     public void Reset()
     {
+        CancelProposals();
         ClearComposition();
         ClearHeld();
         _swallowedShift.Clear();
@@ -453,6 +473,7 @@ public sealed class CompositionController
             return;
         }
 
+        if (!_converting && HandleProposalKey(vk)) return;
         if (_converting && HandleConversionKey(vk)) return;
 
         switch (vk)
@@ -1599,6 +1620,64 @@ public sealed class CompositionController
     private bool EndsWithEnglish(bool final = false) =>
         _text.Mode == DisplayMode.Auto && _text.Segments(final) is { Count: > 0 } segments && segments[^1].IsEnglish;
 
+    private void SyncProposals()
+    {
+        if (_proposalPort is null || _proposalSession is null) return;
+        var change = _proposalSession.Observe(_text.IsEmpty ? "" : _text.Raw);
+        if (change.CancelGeneration is { } oldGeneration) _proposalPort.Cancel(oldGeneration);
+        if (change.Query is { } query) _proposalPort.Request(query, ReceiveProposal);
+    }
+
+    private void ReceiveProposal(ProposalResponse response)
+    {
+        if (_proposalSession is null) return;
+        if (!_proposalSession.Receive(response, out var error)) return;
+        if (error is not null) Diagnostics.Log.Warn($"Proposal を取得できませんでした: {error}");
+        UpdateView();
+    }
+
+    private void CancelProposals()
+    {
+        if (_proposalSession?.Invalidate() is { } generation && _proposalPort is { } port) port.Cancel(generation);
+    }
+
+    private bool HandleProposalKey(int vk)
+    {
+        if (_proposalSession?.HasCandidates != true) return false;
+        switch (vk)
+        {
+            case VirtualKeys.Down:
+                _proposalSession.Move(+1);
+                UpdateView();
+                return true;
+            case VirtualKeys.Up:
+                _proposalSession.Move(-1);
+                UpdateView();
+                return true;
+            case VirtualKeys.Escape:
+                if (_proposalSession.Dismiss() is { } generation) _proposalPort?.Dismissed(generation);
+                UpdateView();
+                return true;
+            case VirtualKeys.Return:
+                return ApplyProposal();
+            default:
+                return false;
+        }
+    }
+
+    private bool ApplyProposal()
+    {
+        if (_proposalSession?.Take(_text.Raw) is not { } selection) return false;
+        ClearComposition();
+        _correctable.Clear();
+        ResetContext();
+        _host.CommitText(selection.Candidate.Representation);
+        Committed?.Invoke(selection.Candidate.Representation);
+        _proposalPort?.Selected(selection);
+        UpdateView();
+        return true;
+    }
+
     private void ReplayDown(KeyEvent e)
     {
         // Meltype を通らないキーを送る = キャレットが動くかもしれないので、直前の語はもう確定し直さない。
@@ -1638,6 +1717,18 @@ public sealed class CompositionController
                 CandidateNotes(selected),
                 _options.CandidateMeanings() ? CandidateMeaning(selected) : null,
                 MisspellingSuggestion()));
+        }
+        else if (_proposalSession?.HasCandidates == true && _proposalSession.Selected is { } proposal)
+        {
+            _host.Show(new CompositionView(
+                CurrentDisplay(final: false),
+                _proposalSession.Candidates.Select(candidate => candidate.Representation).ToList(),
+                _proposalSession.SelectedIndex,
+                true,
+                "↑↓ Proposal　Enter 選択　Esc 取消",
+                Notes: _proposalSession.Candidates.Select(candidate => candidate.Evidence).ToList(),
+                Meaning: proposal.Meaning,
+                Suggestion: MisspellingSuggestion()));
         }
         else
         {
