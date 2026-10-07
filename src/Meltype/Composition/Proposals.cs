@@ -25,6 +25,44 @@ internal readonly record struct ProposalTarget(
     }
 }
 
+internal sealed class ProposalTargetLease
+{
+    private long _generation;
+    private ProposalTarget? _target;
+
+    internal int CountForTest => _target is null ? 0 : 1;
+    internal long GenerationForTest => _target is null ? 0 : _generation;
+
+    public void Bind(long generation, ProposalTarget target)
+    {
+        _generation = generation;
+        _target = target;
+    }
+
+    public void Complete(long generation, ProposalResponse response)
+    {
+        if (response.Error is not null || response.Candidates.Count == 0) Clear(generation);
+    }
+
+    public bool MatchesAndConsume(long generation, ProposalTarget? current)
+    {
+        var matches = _generation == generation && _target is { } expected && current is { } actual && actual == expected;
+        Clear();
+        return matches;
+    }
+
+    public void Clear(long generation)
+    {
+        if (_generation == generation) Clear();
+    }
+
+    public void Clear()
+    {
+        _generation = 0;
+        _target = null;
+    }
+}
+
 /// <summary>
 /// Windows host の薄い Proposal transport。endpoint・非同期I/O・query時target照合だけを持ち、意味判断・rank・資格情報を持たない。
 /// </summary>
@@ -35,7 +73,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     private readonly Uri _endpoint;
     private readonly Func<ProposalTarget?> _currentTarget;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
-    private readonly Dictionary<long, ProposalTarget> _targets = [];
+    private readonly ProposalTargetLease _target = new();
     private CancellationTokenSource? _pending;
     private long _pendingGeneration;
 
@@ -62,12 +100,13 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     public void Request(ProposalQuery query, Action<ProposalResponse> receive)
     {
         CancelPending();
+        _target.Clear();
         if (_currentTarget() is not { } target)
         {
             receive(new ProposalResponse(query.Generation, query.Raw, [], "TARGET_UNAVAILABLE"));
             return;
         }
-        _targets[query.Generation] = target;
+        _target.Bind(query.Generation, target);
         var cancellation = new CancellationTokenSource();
         _pending = cancellation;
         _pendingGeneration = query.Generation;
@@ -76,19 +115,14 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 
     public void Cancel(long generation)
     {
-        _targets.Remove(generation);
+        _target.Clear(generation);
         if (_pendingGeneration == generation) CancelPending();
     }
 
     public bool CanApply(ProposalSelection selection) =>
-        _targets.TryGetValue(selection.Generation, out var expected)
-        && _currentTarget() is { } current
-        && current == expected;
+        _target.MatchesAndConsume(selection.Generation, _currentTarget());
 
-    public void Selected(ProposalSelection selection)
-    {
-        _targets.Remove(selection.Generation);
-    }
+    public void Selected(ProposalSelection selection) { }
 
     public void Dismissed(long generation)
     {
@@ -172,6 +206,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
         {
             if (cancellation.IsCancellationRequested) return;
             FinishPending(query.Generation, cancellation);
+            _target.Complete(query.Generation, response);
             receive(response);
         });
     }
@@ -197,7 +232,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     public void Dispose()
     {
         CancelPending();
-        _targets.Clear();
+        _target.Clear();
         _http.Dispose();
     }
 }

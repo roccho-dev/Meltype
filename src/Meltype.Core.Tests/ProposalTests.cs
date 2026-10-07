@@ -178,6 +178,56 @@ internal static class ProposalTests
     }
 
     [Test]
+    private static void WindowsTargetLeaseKeepsOnlyCurrentGenerationAndClosesAllTerminalPaths()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Tests")) return;
+
+        var windows = Assembly.Load("Meltype");
+        var leaseType = windows.GetType("Meltype.Composition.ProposalTargetLease")
+            ?? throw new AssertionException("ProposalTargetLease が見つからない");
+        var targetType = windows.GetType("Meltype.Composition.ProposalTarget")
+            ?? throw new AssertionException("ProposalTarget が見つからない");
+        var lease = Activator.CreateInstance(leaseType, nonPublic: true)
+            ?? throw new AssertionException("ProposalTargetLease を作れない");
+        var targetCtor = targetType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Single();
+        object Target(string name) => targetCtor.Invoke([new IntPtr(1), null, $"Edit {name}", name, "Edit"]);
+
+        var bind = leaseType.GetMethod("Bind", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        var complete = leaseType.GetMethod("Complete", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        var match = leaseType.GetMethod("MatchesAndConsume", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        var count = leaseType.GetProperty("CountForTest", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var generation = leaseType.GetProperty("GenerationForTest", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var first = Target("A");
+        var second = Target("B");
+
+        // 回答済み候補を選ばず次文字へ進む: latest一系統なので次世代Bindが旧targetを置換する。
+        bind.Invoke(lease, [1L, first]);
+        bind.Invoke(lease, [2L, second]);
+        Assert.Equal(1, (int)count.GetValue(lease)!, "target leaseは常に最大1件");
+        Assert.Equal(2L, (long)generation.GetValue(lease)!, "次世代だけを保持する");
+
+        // empty/errorは選択不能なのでresponse完了時点でtargetを回収する。
+        complete.Invoke(lease, [2L, new ProposalResponse(2, "ux", [], "UNAVAILABLE")]);
+        Assert.Equal(0, (int)count.GetValue(lease)!, "provider errorでtargetを残さない");
+        bind.Invoke(lease, [3L, first]);
+        complete.Invoke(lease, [3L, new ProposalResponse(3, "uxa", [])]);
+        Assert.Equal(0, (int)count.GetValue(lease)!, "empty responseでtargetを残さない");
+
+        // 作用直前target不一致も、その場でleaseを消費してeffect拒否後に残さない。
+        bind.Invoke(lease, [4L, first]);
+        var allowed = (bool)match.Invoke(lease, [4L, second])!;
+        Assert.True(!allowed, "別fieldへの作用を拒否する");
+        Assert.Equal(0, (int)count.GetValue(lease)!, "CanApply拒否後にtargetを残さない");
+
+        bind.Invoke(lease, [5L, first]);
+        allowed = (bool)match.Invoke(lease, [5L, first])!;
+        Assert.True(allowed, "同じtargetは一度だけ許可する");
+        Assert.Equal(0, (int)count.GetValue(lease)!, "成功時も作用前にleaseを消費する");
+    }
+
+    [Test]
     private static void NoPortPreservesNativeComposition()
     {
         var keyboard = new CompositionTests.Keyboard();
