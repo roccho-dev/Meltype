@@ -1668,6 +1668,12 @@ public sealed class CompositionController
     private bool ApplyProposal()
     {
         if (_proposalSession?.Take(_text.Raw) is not { } selection) return false;
+        if (_proposalPort?.CanApply(selection) != true)
+        {
+            Reset();
+            UpdateView();
+            return true;
+        }
         ClearComposition();
         _correctable.Clear();
         ResetContext();
@@ -1726,8 +1732,8 @@ public sealed class CompositionController
                 _proposalSession.SelectedIndex,
                 true,
                 "↑↓ Proposal　Enter 選択　Esc 取消",
-                Notes: _proposalSession.Candidates.Select(candidate => candidate.Evidence).ToList(),
-                Meaning: proposal.Meaning,
+                Notes: _proposalSession.Candidates.Select(candidate => candidate.Evidence.ToString()).ToList(),
+                Meaning: proposal.Meaning.ToString(),
                 Suggestion: MisspellingSuggestion()));
         }
         else

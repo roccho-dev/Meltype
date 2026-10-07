@@ -3,30 +3,50 @@
 
 using System.Net.Http.Json;
 using System.Text.Json;
+using Meltype.Input;
 
 namespace Meltype.Composition;
 
+internal readonly record struct ProposalTarget(
+    IntPtr Foreground,
+    Rectangle? Bounds,
+    string Description,
+    string Name,
+    string ClassName)
+{
+    public static ProposalTarget? Capture(FocusInspector focus)
+    {
+        if (!focus.CanCapture) return null;
+        var foreground = Native.GetForegroundWindow();
+        if (foreground == IntPtr.Zero || ForegroundTracker.IsOwnWindow(foreground)) return null;
+        var info = focus.Current;
+        if (!info.IsTextInput || info.IsPassword) return null;
+        return new ProposalTarget(foreground, info.Bounds, info.Description, info.Name, info.ClassName);
+    }
+}
+
 /// <summary>
-/// Windows host の薄い Proposal transport。endpoint と非同期I/Oだけを持ち、意味判断・rank・資格情報を持たない。
+/// Windows host の薄い Proposal transport。endpoint・非同期I/O・query時target照合だけを持ち、意味判断・rank・資格情報を持たない。
 /// </summary>
 internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 {
     private const string EndpointVariable = "MELTYPE_PROPOSAL_URL";
     private readonly Control _invoker;
     private readonly Uri _endpoint;
-    private readonly Func<bool> _targetAvailable;
+    private readonly Func<ProposalTarget?> _currentTarget;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private readonly Dictionary<long, ProposalTarget> _targets = [];
     private CancellationTokenSource? _pending;
     private long _pendingGeneration;
 
-    private ProposalHttpPort(Control invoker, Uri endpoint, Func<bool> targetAvailable)
+    private ProposalHttpPort(Control invoker, Uri endpoint, Func<ProposalTarget?> currentTarget)
     {
         _invoker = invoker;
         _endpoint = endpoint;
-        _targetAvailable = targetAvailable;
+        _currentTarget = currentTarget;
     }
 
-    public static ProposalHttpPort? FromEnvironment(Control invoker, Func<bool> targetAvailable)
+    public static ProposalHttpPort? FromEnvironment(Control invoker, Func<ProposalTarget?> currentTarget)
     {
         var value = Environment.GetEnvironmentVariable(EndpointVariable);
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -36,12 +56,18 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
             Diagnostics.Log.Warn($"{EndpointVariable} が有効な http(s) URL ではないため Proposal を無効にします。");
             return null;
         }
-        return new ProposalHttpPort(invoker, endpoint, targetAvailable);
+        return new ProposalHttpPort(invoker, endpoint, currentTarget);
     }
 
     public void Request(ProposalQuery query, Action<ProposalResponse> receive)
     {
         CancelPending();
+        if (_currentTarget() is not { } target)
+        {
+            receive(new ProposalResponse(query.Generation, query.Raw, [], "TARGET_UNAVAILABLE"));
+            return;
+        }
+        _targets[query.Generation] = target;
         var cancellation = new CancellationTokenSource();
         _pending = cancellation;
         _pendingGeneration = query.Generation;
@@ -50,12 +76,24 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 
     public void Cancel(long generation)
     {
+        _targets.Remove(generation);
         if (_pendingGeneration == generation) CancelPending();
     }
 
-    public void Selected(ProposalSelection selection) { }
+    public bool CanApply(ProposalSelection selection) =>
+        _targets.TryGetValue(selection.Generation, out var expected)
+        && _currentTarget() is { } current
+        && current == expected;
 
-    public void Dismissed(long generation) { }
+    public void Selected(ProposalSelection selection)
+    {
+        _targets.Remove(selection.Generation);
+    }
+
+    public void Dismissed(long generation)
+    {
+        Cancel(generation);
+    }
 
     private async Task Send(ProposalQuery query, Action<ProposalResponse> receive, CancellationTokenSource cancellation)
     {
@@ -71,41 +109,14 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellation.Token);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellation.Token);
-            var root = document.RootElement;
-            if (!root.TryGetProperty("generation", out var generationElement)
-                || generationElement.GetInt64() != query.Generation
-                || !root.TryGetProperty("raw", out var rawElement)
-                || rawElement.GetString() != query.Raw
-                || !root.TryGetProperty("proposals", out var proposalsElement)
-                || proposalsElement.ValueKind != JsonValueKind.Array)
-            {
-                Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE"));
-                return;
-            }
-
-            var proposals = new List<ProposalCandidate>();
-            foreach (var item in proposalsElement.EnumerateArray())
-            {
-                if (!item.TryGetProperty("id", out var id)
-                    || !item.TryGetProperty("representation", out var representation)
-                    || id.ValueKind != JsonValueKind.String
-                    || representation.ValueKind != JsonValueKind.String)
-                {
-                    Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE"));
-                    return;
-                }
-                var meaning = item.TryGetProperty("meaning", out var meaningElement) ? meaningElement.GetRawText() : "null";
-                var evidence = item.TryGetProperty("evidence", out var evidenceElement) ? evidenceElement.GetRawText() : "null";
-                proposals.Add(new ProposalCandidate(id.GetString() ?? "", representation.GetString() ?? "", meaning, evidence));
-            }
-            Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, proposals));
+            Deliver(query, receive, cancellation, ParseResponse(query, document.RootElement));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (TaskCanceledException)
         {
             Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "TIMEOUT"));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
         {
             Deliver(query, receive, cancellation, new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE"));
         }
@@ -115,16 +126,62 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
         }
     }
 
+    internal static ProposalResponse ParseResponseForTest(ProposalQuery query, JsonElement root) => ParseResponse(query, root);
+
+    private static ProposalResponse ParseResponse(ProposalQuery query, JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("generation", out var generationElement)
+            || generationElement.ValueKind != JsonValueKind.Number
+            || !generationElement.TryGetInt64(out var generation)
+            || generation != query.Generation
+            || !root.TryGetProperty("raw", out var rawElement)
+            || rawElement.ValueKind != JsonValueKind.String
+            || rawElement.GetString() != query.Raw
+            || !root.TryGetProperty("proposals", out var proposalsElement)
+            || proposalsElement.ValueKind != JsonValueKind.Array)
+            return new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE");
+
+        var proposals = new List<ProposalCandidate>();
+        foreach (var item in proposalsElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object
+                || !item.TryGetProperty("id", out var id)
+                || id.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(id.GetString())
+                || !item.TryGetProperty("representation", out var representation)
+                || representation.ValueKind != JsonValueKind.String
+                || string.IsNullOrEmpty(representation.GetString())
+                || !item.TryGetProperty("meaning", out var meaning)
+                || !item.TryGetProperty("evidence", out var evidence))
+                return new ProposalResponse(query.Generation, query.Raw, [], "INVALID_RESPONSE");
+
+            proposals.Add(new ProposalCandidate(
+                id.GetString()!,
+                representation.GetString()!,
+                meaning.Clone(),
+                evidence.Clone()));
+        }
+        return new ProposalResponse(query.Generation, query.Raw, proposals);
+    }
+
     private void Deliver(ProposalQuery query, Action<ProposalResponse> receive, CancellationTokenSource cancellation, ProposalResponse response)
     {
         if (cancellation.IsCancellationRequested || !_invoker.IsHandleCreated || _invoker.IsDisposed) return;
         _invoker.BeginInvoke(() =>
         {
             if (cancellation.IsCancellationRequested) return;
-            receive(_targetAvailable()
-                ? response
-                : new ProposalResponse(query.Generation, query.Raw, [], "TARGET_CHANGED"));
+            FinishPending(query.Generation, cancellation);
+            receive(response);
         });
+    }
+
+    private void FinishPending(long generation, CancellationTokenSource cancellation)
+    {
+        if (_pendingGeneration != generation || !ReferenceEquals(_pending, cancellation)) return;
+        _pending = null;
+        _pendingGeneration = 0;
+        cancellation.Dispose();
     }
 
     private void CancelPending()
@@ -140,6 +197,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     public void Dispose()
     {
         CancelPending();
+        _targets.Clear();
         _http.Dispose();
     }
 }

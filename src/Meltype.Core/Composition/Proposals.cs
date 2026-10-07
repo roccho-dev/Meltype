@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.Text.Json;
+
 namespace Meltype.Composition;
 
-/// <summary>意味 Proposal。表示文字列とは別に、元の opaque identity と意味・根拠を保持する。</summary>
-public sealed record ProposalCandidate(string Id, string Representation, string Meaning, string Evidence);
+/// <summary>意味 Proposal。表示文字列とは別に、元の opaque identity と typed JSON payload を保持する。</summary>
+public sealed record ProposalCandidate(string Id, string Representation, JsonElement Meaning, JsonElement Evidence);
 
 /// <summary>Controller が観測した一つの raw input 世代。</summary>
 public sealed record ProposalQuery(long Generation, string Raw);
@@ -24,6 +26,7 @@ public interface IProposalPort
 {
     void Request(ProposalQuery query, Action<ProposalResponse> receive);
     void Cancel(long generation);
+    bool CanApply(ProposalSelection selection);
     void Selected(ProposalSelection selection);
     void Dismissed(long generation);
 }
@@ -53,7 +56,7 @@ internal sealed class ProposalSession
     public ProposalChange Observe(string raw)
     {
         if (raw == _raw) return new(null, null);
-        var cancel = _generation > 0 && !_answered ? _generation : null;
+        long? cancel = _generation > 0 && !_answered ? _generation : null;
         _generation++;
         _raw = raw;
         _candidates = [];
@@ -79,8 +82,8 @@ internal sealed class ProposalSession
         var items = response.Candidates?.ToArray() ?? [];
         if (items.Any(candidate => string.IsNullOrWhiteSpace(candidate.Id)
                 || string.IsNullOrEmpty(candidate.Representation)
-                || candidate.Meaning is null
-                || candidate.Evidence is null)
+                || candidate.Meaning.ValueKind == JsonValueKind.Undefined
+                || candidate.Evidence.ValueKind == JsonValueKind.Undefined)
             || items.Select(candidate => candidate.Id).Distinct(StringComparer.Ordinal).Count() != items.Length)
         {
             error = "INVALID_PROPOSALS";
@@ -129,7 +132,7 @@ internal sealed class ProposalSession
 
     public long? Invalidate()
     {
-        var cancel = _generation > 0 && !_answered ? _generation : null;
+        long? cancel = _generation > 0 && !_answered ? _generation : null;
         _generation++;
         _raw = "";
         _candidates = [];

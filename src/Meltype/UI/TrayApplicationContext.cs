@@ -63,7 +63,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Placement = () => _engine.Settings.CompositionPlacement,
             Size = () => _engine.Settings.CompositionSize,
         });
-        _proposals = Composition.ProposalHttpPort.FromEnvironment(_invoker, () => _composition.Focus.CanCapture);
+        _proposals = Composition.ProposalHttpPort.FromEnvironment(_invoker, () => Composition.ProposalTarget.Capture(_composition.Focus));
         if (_proposals is not null) _composition.Controller.AttachProposals(_proposals);
         _engine.AttachComposition(_composition);
 
