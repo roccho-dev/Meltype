@@ -132,6 +132,9 @@ $loaded = Invoke-SelfTest '参照をたどって削った後'
 # 2. 読み込まれなかった大きなアセンブリを削る
 foreach ($file in Get-ChildItem (Join-Path $runtime 'shared') -Recurse -Filter '*.dll') {
     if ($file.Length -le 512KB -or -not (Test-Managed $file.FullName)) { continue }
+    # 第一段階の静的 runtime closure は optional path も含む正本。
+    # 通常 selftest でその回に load されなかっただけの assembly を第二段階で再削除しない。
+    if ($keep -contains $file.Name) { continue }
     if ($loaded -notcontains $file.BaseName) {
         # System.Reflection.Metadata.dll は ClipBoard.SetText() で使われるため continue する
         if ($file.Name -eq 'System.Reflection.Metadata.dll') { continue }
@@ -141,6 +144,29 @@ foreach ($file in Get-ChildItem (Join-Path $runtime 'shared') -Recurse -Filter '
 }
 Update-DepsJson
 Invoke-SelfTest '読み込まれない部品も削った後' | Out-Null
+
+# 第一段階で必要と判定した managed assembly は、第二段階の dynamic pruning 後にも全て残っていること。
+$missingClosure = @(
+    $keep | Where-Object {
+        $name = $_
+        -not (Get-ChildItem (Join-Path $runtime 'shared') -Recurse -File -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1)
+    }
+)
+if ($missingClosure.Count -gt 0) {
+    throw "必要な runtime closure を削除しました: $($missingClosure -join ', ')"
+}
+
+# Proposal は設定時だけ通る optional path なので、endpoint 未設定 selftest だけでは配布確認にならない。
+# 実際の同梱 runtime で endpoint を有効にした Tray/Proposal transport の startup まで通し、
+# System.Net.Http 等を第二段階 pruning で落とす偽陽性を package 作成時に止める。
+$previousProposalUrl = [Environment]::GetEnvironmentVariable('MELTYPE_PROPOSAL_URL', 'Process')
+try {
+    [Environment]::SetEnvironmentVariable('MELTYPE_PROPOSAL_URL', 'http://127.0.0.1:9/meltype-proposal-selftest', 'Process')
+    Invoke-SelfTest 'Proposal endpoint 有効・同梱 runtime' | Out-Null
+}
+finally {
+    [Environment]::SetEnvironmentVariable('MELTYPE_PROPOSAL_URL', $previousProposalUrl, 'Process')
+}
 
 # コード署名 (証明書があるときだけ): 環境変数 MELTYPE_SIGN_PFX (証明書の .pfx) と MELTYPE_SIGN_PASSWORD を設定すると、
 # Meltype.exe・Meltype.dll・Mozc のヘルパーに署名する (SmartScreen の警告とウイルス対策ソフトの誤検知を減らすため)。
