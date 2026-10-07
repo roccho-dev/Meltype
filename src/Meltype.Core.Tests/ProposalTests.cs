@@ -182,7 +182,7 @@ internal static class ProposalTests
     {
         var keyboard = new CompositionTests.Keyboard();
         keyboard.Type("u");
-        Assert.Equal("u", keyboard.Host.View?.Text, "portなしでは従来のraw表示");
+        Assert.Equal("う", keyboard.Host.View?.Text, "portなしでは従来のnative表示");
         Assert.True(keyboard.Host.View?.Converting == false, "portなしで候補modeへ入らない");
         Assert.Equal(0, keyboard.Host.View?.Candidates.Count ?? 0, "portなしでProposal候補を作らない");
     }
