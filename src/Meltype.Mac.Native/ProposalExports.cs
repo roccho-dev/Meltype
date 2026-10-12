@@ -46,11 +46,14 @@ public static unsafe class ProposalExports
         public void Dismissed(long generation) => Cancel(generation);
         public void Selected(ProposalSelection selection) => Selection = selection;
 
+        private static bool SafeText(string? text) =>
+            !string.IsNullOrEmpty(text) && text.Length <= 65536 && !text.Any(char.IsControl);
+
         public bool CanApply(ProposalSelection selection)
         {
             var allowed = _target.Length != 0 && _queryEpoch == _epoch &&
                 Current is { } current && current.Generation == selection.Generation && current.Raw == selection.Raw &&
-                !selection.Candidate.Representation.Any(char.IsControl);
+                SafeText(selection.Candidate.Representation);
             Current = Pending = null;
             _receive = null;
             return allowed;
@@ -82,9 +85,9 @@ public static unsafe class ProposalExports
                         var id = item.GetProperty("id").GetString();
                         var text = item.GetProperty("representation").GetString();
                         if (string.IsNullOrWhiteSpace(id) || id.Length > 1024 ||
-                            string.IsNullOrEmpty(text) || text.Length > 65536)
+                            !SafeText(text))
                             throw new FormatException();
-                        candidates.Add(new(id, text, item.GetProperty("meaning").Clone(), item.GetProperty("evidence").Clone()));
+                        candidates.Add(new(id, text!, item.GetProperty("meaning").Clone(), item.GetProperty("evidence").Clone()));
                     }
                 }
                 response = new(query.Generation, query.Raw, candidates, error);

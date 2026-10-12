@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Real NixOS test VM, unchanged bcon, virtual physical keyboard, real scanout.
 import hashlib
+import base64
 import json
 from pathlib import Path
 import shlex
@@ -120,7 +121,14 @@ def wait_scanout(name,check):
     while True:
         image=scanout(name)
         if check(image): return image
-        assert time.monotonic()<deadline, machine.succeed('cat /run/meltype-proof/browser-errors')
+        if time.monotonic()>=deadline:
+            # A failed Nix derivation cannot publish its $out images. Keep one
+            # bounded fixture-only image in the existing test log for diagnosis.
+            png=(Path(machine.out_dir)/(name+'.png')).read_bytes()
+            assert len(png)<=1024*1024
+            print('MELTYPE_FAILURE_PNG '+name+' '+base64.b64encode(png).decode(),flush=True)
+            print(machine.succeed("ps -eo pid,ppid,tty,args; cat /run/meltype-proof/browser-errors; cat /run/meltype-proof/native-trace 2>/dev/null || true; cat /run/meltype-proof/proposal-query 2>/dev/null || true"),flush=True)
+            raise AssertionError('actual browser scanout not observed: '+name)
         time.sleep(.2)
 
 base=wait_scanout('browser-before-input',lambda im:color_pixels(im,(215,225,240))>2000)
@@ -163,7 +171,26 @@ server.serve_forever()
 machine.succeed('printf %s '+shlex.quote(provider)+' > /run/meltype-proof/provider.py')
 machine.succeed('systemd-run --unit=meltype-test-proposals --service-type=exec /run/current-system/sw/bin/python3 /run/meltype-proof/provider.py')
 machine.wait_until_succeeds('test -e /run/meltype-proof/provider-ready')
-machine.send_chars('stty -g > /run/meltype-proof/typed-before; MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)" 2>/run/meltype-proof/browser-errors; rc=$?; stty -g > /run/meltype-proof/typed-after; printf %s "$rc" > /run/meltype-proof/typed-exit\n')
+# Read-only trace of the fixture's real CLI. It does not alter keys or native
+# results and is never installed in the product or enabled outside this VM.
+trace = r'''import json,sys,os
+out=open('/run/meltype-proof/native-trace','a',buffering=1)
+out.write(json.dumps({'pid':os.getpid(),'argv':sys.argv})+'\n')
+count=0
+def profile(frame,event,result):
+    global count
+    if count>=100 or not frame.f_code.co_filename.endswith('meltype_tty.py'): return
+    name=frame.f_code.co_name
+    data=None
+    if event=='call' and name=='run': data={'run':frame.f_locals.get('argv')}
+    if event=='call' and name=='_native_key': data={'key':{k:repr(frame.f_locals.get(k)) for k in ['vk','char','modifiers','original']}}
+    if event=='return' and name=='poll_proposals' and result is not None: data={'response':result}
+    if data is not None:
+        count+=1;out.write(json.dumps(data,ensure_ascii=False)+'\n')
+sys.setprofile(profile)
+'''
+machine.succeed('mkdir -p /run/meltype-proof/trace; printf %s '+shlex.quote(trace)+' > /run/meltype-proof/trace/sitecustomize.py')
+machine.send_chars('stty -g > /run/meltype-proof/typed-before; PYTHONPATH=/run/meltype-proof/trace MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)" 2>/run/meltype-proof/browser-errors; rc=$?; stty -g > /run/meltype-proof/typed-after; printf %s "$rc" > /run/meltype-proof/typed-exit\n')
 base=wait_scanout('typed-browser-before',lambda im:color_pixels(im,(215,225,240))>2000)
 machine.send_chars('u')
 # Native "u" preedit alone is one 600x52 image. Require the taller real

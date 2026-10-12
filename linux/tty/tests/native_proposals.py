@@ -86,7 +86,12 @@ class NativeProposalProof(unittest.TestCase):
         self.assertFalse(self.bridge.view['candidates']);self.assertEqual(self.bridge.view['text'],'ux')
     def test_control_character_candidate_is_not_a_command(self):
         self.send(b'u');q=self.query();self.response(q,[self.candidate('A','unexpected\ncommand')])
-        self.assertEqual(self.send(b'\r'),b'');self.assertIsNone(self.native.take_selection())
+        self.assertFalse(self.bridge.view['candidates'],'unsafe text must not be offered as a selectable candidate')
+        self.assertEqual(self.bridge.view['text'],'う','the existing native preedit must remain')
+        self.assertIsNone(self.native.take_selection())
+        self.send(b'\x1b[21~')  # F10 recovers the original raw spelling, not provider text.
+        self.assertEqual(self.send(b'\r'),b'u')
+        self.assertIsNone(self.native.take_selection())
     def test_real_http_response_reaches_core_without_blocking_key_thread(self):
         seen=[]
         class Handler(BaseHTTPRequestHandler):
