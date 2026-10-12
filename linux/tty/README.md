@@ -57,3 +57,34 @@ It is deliberately not installed by linux/build.sh and not a NixOS service.
 Design: [ADRS #618](https://github.com/roccho-dev/adrs/issues/618).
 Browser ownership: [ADRS #615](https://github.com/roccho-dev/adrs/issues/615).
 This draft does not authorize deployment, merge, or retiring edits.
+
+## bcon / NixOS E2E ownership (in this Meltype PR)
+
+**The real bcon proof belongs to this Meltype PR, not to a new resources PR.**
+Run the test on an isolated NixOS VT with an already available pinned bcon
+build, terminal.ime=false, no Fcitx5 input path and a pinned matching
+Meltype NativeAOT + Mozc helper. Neither this PR nor the test may mutate
+resources, persistent browser profiles, system configuration or user secrets.
+
+Completion requires separately recorded **actual** observations with source
+revision, bcon revision, host/VT identity, input, expected output, actual child
+PTY bytes, display evidence, and readback:
+
+1. Direct ASCII and shell controls reach only the bound child PTY, byte-exact;
+   no Japanese misclassification, silent key loss or unexpected command execution.
+2. Mixed English/Japanese can be composed and corrected with the original
+   Meltype core, visible preedit and candidate selection; neither SKK nor
+   Fcitx5 is required. The current code **does not yet pass** this gate.
+3. Resize, PTY output repaint, Ctrl/Alt/Escape/Enter, paste, focus/VT switch,
+   app exit and restart preserve the terminal and never replay an uncertain
+   write. Unobservable target state must fail closed.
+4. With cdp-tty as the child, a committed Japanese string actually reaches
+   the *existing* Headless Chrome target and is independently read back;
+   byte emission to PTY alone is not proof of browser effect.
+5. Real code, built artifact, test invocation, rollback and independent
+   review refer to the same revision; a CI stub/PTY test cannot be promoted
+   to bcon real-input acceptance.
+
+Until those gates pass, **BCON_E2E=NOT_PROVEN / PRODUCT=NOT_READY**.
+A resources PR is warranted only when making a permanent NixOS declaration,
+distribution or recovery change, after the product implementation is accepted.
