@@ -141,3 +141,53 @@ print(json.dumps({'gate':'bcon-meltype-cdp-tty-existing-browser-dom','status':'P
     'terminal_restored':True,'text_input':'virtual keyboard only',
     'production_browser':'NOT_TOUCHED','target_laptop':'NOT_RUN',
     'independent_review':'NOT_RUN'},ensure_ascii=False),flush=True)
+
+# The optional provider remains a test fixture. This proves the real input and
+# rendering path, not the quality of a production ranker or shared source binding.
+provider = r'''from http.server import BaseHTTPRequestHandler,HTTPServer
+import json
+from pathlib import Path
+class Provider(BaseHTTPRequestHandler):
+    def do_POST(self):
+        query=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        Path('/run/meltype-proof/proposal-query').write_text(json.dumps(query))
+        body=json.dumps({**query,'proposals':[
+            {'id':'typed-A','representation':'甲候補','meaning':{'kind':'text','value':'A'},'evidence':['test-source','A']},
+            {'id':'typed-B','representation':'乙候補','meaning':{'kind':'text','value':'B'},'evidence':['test-source','B']}]}).encode()
+        self.send_response(200);self.end_headers();self.wfile.write(body)
+    def log_message(self,*_): pass
+server=HTTPServer(('127.0.0.1',8031),Provider)
+Path('/run/meltype-proof/provider-ready').touch()
+server.serve_forever()
+'''
+machine.succeed('printf %s '+shlex.quote(provider)+' > /run/meltype-proof/provider.py')
+machine.succeed('systemd-run --unit=meltype-test-proposals --service-type=exec /run/current-system/sw/bin/python3 /run/meltype-proof/provider.py')
+machine.wait_until_succeeds('test -e /run/meltype-proof/provider-ready')
+machine.send_chars('stty -g > /run/meltype-proof/typed-before; MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)" 2>/run/meltype-proof/browser-errors; rc=$?; stty -g > /run/meltype-proof/typed-after; printf %s "$rc" > /run/meltype-proof/typed-exit\n')
+base=wait_scanout('typed-browser-before',lambda im:color_pixels(im,(215,225,240))>2000)
+machine.send_chars('u')
+# Native "u" preedit alone is one 600x52 image. Require the taller real
+# provider-candidate panel, not merely any different or dark screen pixels.
+typed_panel=wait_scanout('typed-browser-candidates',lambda im:panel_pixels(im)>panel_pixels(base)+45000)
+query=json.loads(machine.succeed('cat /run/meltype-proof/proposal-query'))
+assert query['raw']=='u' and query['generation']>0,query
+machine.succeed(browser_value('日本語'))
+machine.send_key('down')
+time.sleep(.3)
+scanout('typed-browser-selected')
+machine.send_key('ret')
+machine.wait_until_succeeds(browser_value('日本語乙候補'))
+scanout('typed-browser-committed')
+machine.send_key('ctrl-q')
+machine.wait_until_succeeds('test -e /run/meltype-proof/typed-exit')
+assert machine.succeed('cat /run/meltype-proof/typed-exit').strip()=='0'
+assert machine.succeed('cat /run/meltype-proof/typed-before')==machine.succeed('cat /run/meltype-proof/typed-after')
+assert machine.succeed('systemctl show -p MainPID --value meltype-test-browser').strip()==browser_pid
+readback=json.loads(machine.succeed(browser_value('日本語乙候補')))
+machine.succeed('systemctl stop meltype-test-proposals')
+print(json.dumps({'gate':'bcon-local-typed-proposal-cli-cdp-dom','status':'PASS',
+    'readback':readback,'raw':query['raw'],'provider':'local test fixture',
+    'displayed_candidates':2,'selected_text':'乙候補','viewer_exit':0,
+    'terminal_restored':True,'browser_pid_preserved':True,
+    'text_input':'virtual keyboard only','external_models':'NOT_CALLED',
+    'shared_source_binding':'NOT_RUN','independent_review':'NOT_RUN'},ensure_ascii=False),flush=True)
