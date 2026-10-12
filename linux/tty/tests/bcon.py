@@ -67,5 +67,6 @@ print(json.dumps({"gate":"nixos-vm-bcon-native-pty-scanout","status":"PASS",
     "input":"nihongo / Down / Enter","child_text":"ニホンゴ",
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
     "preedit_not_in_child":True,"candidate_scanout_pixels":panel_pixels(shown),
+    "candidate_png_sha256":hashlib.sha256((Path(machine.out_dir)/"bcon-candidates.png").read_bytes()).hexdigest(),
     "exit":0,"terminal_restored":True,
     "target_laptop":"NOT_RUN","browser_dom":"NOT_RUN","independent_review":"NOT_RUN"}),flush=True)
