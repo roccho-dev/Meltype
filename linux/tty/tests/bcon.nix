@@ -7,6 +7,7 @@ let
   };
   pkgs = import (resources + "/verification/pkgs.nix");
   bcon = pkgs.callPackage (resources + "/nixos/bcon.nix") { };
+  cjk = pkgs.noto-fonts-cjk-sans.override { static = true; };
   python = pkgs.python3.withPackages (p: [ p.pillow ]);
   product = pkgs.stdenvNoCC.mkDerivation {
     pname = "meltype-tty-trial";
@@ -20,8 +21,8 @@ let
       mkdir -p "$out/lib/meltype" "$out/bin"
       cp -r . "$out/lib/meltype/"
       chmod +x "$out/lib/meltype/mozc/meltype_mozc_helper"
-      font=$(find ${pkgs.noto-fonts-cjk-sans} -name NotoSansCJK-Regular.ttc -print -quit)
-      test -n "$font"
+      font=${cjk}/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc
+      test -r "$font" || { echo "declared CJK font is missing: $font" >&2; exit 1; }
       makeWrapper ${python}/bin/python3 "$out/bin/meltype-tty" \
         --add-flags "$out/lib/meltype/tty/meltype_tty.py" \
         --add-flags "--native $out/lib/meltype/libMeltypeNative.so" \
@@ -48,7 +49,7 @@ in pkgs.testers.runNixOSTest {
     virtualisation.cores = 2;
     hardware.graphics.enable = true;
     services.dbus.enable = true;
-    fonts.packages = [ pkgs.noto-fonts pkgs.noto-fonts-cjk-sans ];
+    fonts.packages = [ pkgs.noto-fonts cjk ];
     environment.systemPackages = [ bcon product python pkgs.kbd pkgs.procps ];
     environment.etc."bcon/config.toml".text = "[terminal]\nime = false\n";
     services.logind.settings.Login = { NAutoVTs = 1; ReserveVT = 1; };
