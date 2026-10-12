@@ -1,8 +1,6 @@
 name: linux
 
-# Linux 版 (linux/、IBus) をビルドして、テスター向けの zip を実行結果 (Artifacts) に置く。
-# Actions の画面から手動で実行するか、Linux 版・Mozc のヘルパー・共通部分を変えて push したとき。タグ (v*) ならリリースにも添付する。
-# Mozc のビルドは初回 30〜40 分かかるので、Bazel の結果をキャッシュして次から速くする。
+# Linux版の既存buildと同じ配布物からDirect TTYを試験する。
 on:
   workflow_dispatch:
   push:
@@ -25,13 +23,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Direct TTY transport proof (Python / POSIX PTY)
         run: python3 -m unittest discover -s linux/tty/tests -v
-      # IBus のエンジン (Python) の書き間違いを、時間のかかるビルドの前に見つける
       - name: Check Python
         run: python3 -c "import ast; ast.parse(open('linux/ibus-engine-meltype', encoding='utf-8').read())"
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      # Mozc の Linux のビルドと、NativeAOT のリンクに使うもの
       - name: Packages
         run: |
           sudo apt-get update
@@ -45,7 +41,6 @@ jobs:
           key: mozc-linux-${{ hashFiles('native/mozc/MOZC_COMMIT') }}-${{ hashFiles('native/mozc/*.cc', 'native/mozc/BUILD.fragment') }}
           restore-keys: |
             mozc-linux-${{ hashFiles('native/mozc/MOZC_COMMIT') }}-
-      # Bazelisk は版を固定し、ダウンロードしたものが公開されているものと同じか (SHA-256) を確かめる。
       - name: Bazelisk
         run: |
           mkdir -p "$HOME/tools"
@@ -56,9 +51,12 @@ jobs:
         run: BAZEL="$HOME/tools/bazelisk" native/mozc/build-mozc-helper.sh "$HOME/mozc" "$HOME/bazel-cache"
       - name: Build
         run: linux/build.sh
+      - name: Same-package real NativeAOT, Mozc and PTY
+        run: |
+          python3 -m unittest discover -s linux/build/Meltype-linux/tty/tests -v
+          python3 linux/build/Meltype-linux/tty/tests/native_tty.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
-          # タグ (v1.0.0) なら Meltype-1.0.0-linux.zip、それ以外はテスト版の名前
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then name="Meltype-${GITHUB_REF_NAME#v}-linux.zip"; else name="Meltype-linux-test-$(date +%Y%m%d-%H%M).zip"; fi
           (cd linux/build && zip -qr "$name" Meltype-linux)
           ls -la linux/build

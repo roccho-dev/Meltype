@@ -4,6 +4,7 @@
 
 No Fcitx5, IBus, or SKK. This is a *transport proof*, not a production IME:
 there is no preedit overlay, Proposal endpoint, or surrounding-text editing.
+Real NativeAOT, Mozc and bound-PTY tests are separate from visual bcon proof.
 Unsupported edits stop before writing to the child. Use only in a disposable PTY.
 """
 
@@ -18,6 +19,9 @@ import signal
 import sys
 import termios
 import tty
+import time
+import errno
+import re
 from pathlib import Path
 
 
@@ -83,11 +87,13 @@ def effect_bytes(result, original=b""):
         if not isinstance(edit, dict) or type(edit.get("deleteBefore")) is not int or not isinstance(edit.get("text"), str):
             raise UnsafeEffect("invalid TextEdit")
         if edit["deleteBefore"] != 0:
-            # Terminal history/caret cannot be safely edited by sending backspaces.
             raise UnsafeEffect("nonzero DeleteBefore requires an observed editable target")
         if any(ord(ch) < 32 or ord(ch) == 127 for ch in edit["text"]):
             raise UnsafeEffect("control characters in an unconfirmed terminal commit")
-        out.extend(edit["text"].encode("utf-8"))
+        try:
+            out.extend(edit["text"].encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise UnsafeEffect("invalid Unicode in native commit") from error
         if len(out) > 1024 * 1024:
             raise UnsafeEffect("commit exceeded the bounded 1 MiB limit")
     if not result["consumed"]:
@@ -95,9 +101,10 @@ def effect_bytes(result, original=b""):
     return bytes(out)
 
 
-# Existing MeltypeSession expects Windows virtual key codes for characters.
 SPECIAL = {13: 0x0D, 10: 0x0D, 9: 0x09, 32: 0x20, 127: 0x08, 8: 0x08, 27: 0x1B}
 SYMBOL = {ord(","): 0xBC, ord("."): 0xBE, ord("-"): 0xBD, ord("/"): 0xBF, ord("["): 0xDB, ord("]"): 0xDD}
+ARROWS = {b"A": 0x26, b"B": 0x28, b"C": 0x27, b"D": 0x25, b"H": 0x24, b"F": 0x23}
+FUNCTIONS = {17: 0x75, 18: 0x76, 19: 0x77, 20: 0x78, 21: 0x79}
 PASTE_BEGIN = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
@@ -111,6 +118,7 @@ class InputBridge:
         self.escape = bytearray()
         self.paste = bytearray()
         self.pasting = False
+        self.escape_started = None
 
     def _step(self, byte):
         if 65 <= byte <= 90:
@@ -131,12 +139,30 @@ class InputBridge:
         return effect
 
     def _passthrough(self, raw):
-        # We cannot interleave an unfinished composition with unknown controls.
         if self.view is not None:
             effect = effect_bytes(self.native.commit())
             self.view = None
             return effect + raw
         return raw
+
+    def _sequence(self, raw):
+        # Cursor/device/graphics replies are not user commands. Never commit
+        # composition just because a terminal answered the child's query.
+        if re.fullmatch(rb"\x1b\[\??[0-9;]*[Rcn]", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^")):
+            return raw
+        key = re.fullmatch(rb"\x1b(?:\[|O)(?:1;([2-8]))?([ABCDHF])", raw)
+        function = re.fullmatch(rb"\x1b\[([0-9]+)~", raw)
+        vk = ARROWS.get(key[2]) if key else FUNCTIONS.get(int(function[1])) if function else None
+        if self.view is not None and vk is not None:
+            modifiers = int(key[1] or b"1") - 1 if key else 0
+            # Only Shift is representable by the current native binding.
+            if modifiers & ~1:
+                return self._passthrough(raw)
+            result = self.native.key(vk, 0, modifiers)
+            effect = effect_bytes(result, raw)
+            self.view = result.get("view")
+            return effect
+        return self._passthrough(raw)
 
     def feed(self, data):
         out = bytearray()
@@ -146,38 +172,50 @@ class InputBridge:
                 if len(self.paste) > 1024 * 1024:
                     raise UnsafeEffect("paste exceeded the bounded 1 MiB limit")
                 if self.paste.endswith(PASTE_END):
-                    out.extend(bytes(self.paste))
+                    out.extend(self._passthrough(bytes(self.paste)))
                     self.paste.clear()
                     self.pasting = False
                 continue
             if self.escape:
                 self.escape.append(byte)
-                if len(self.escape) > 64:
+                string_sequence = self.escape[:2] in (b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")
+                if len(self.escape) > (1024 * 1024 if string_sequence else 64):
                     raise UnsafeEffect("unbounded terminal escape sequence")
+                if string_sequence:
+                    if self.escape.endswith(b"\x1b\\") or (self.escape[:2] == b"\x1b]" and byte == 7):
+                        out.extend(self._sequence(bytes(self.escape)))
+                        self.escape.clear()
+                    continue
                 if self.escape == b"\x1b[" or self.escape == b"\x1bO":
                     continue
                 if len(self.escape) == 2 and byte not in (ord("["), ord("O")):
-                    out.extend(self._passthrough(bytes(self.escape)))  # Alt+key
+                    out.extend(self._passthrough(bytes(self.escape)))
                     self.escape.clear()
                     continue
                 if len(self.escape) >= 3 and 0x40 <= byte <= 0x7E:
                     sequence = bytes(self.escape)
                     self.escape.clear()
                     if sequence == PASTE_BEGIN:
-                        # Do not send a half-open paste to the child on later failure.
                         self.paste.extend(sequence)
                         self.pasting = True
                     else:
-                        out.extend(self._passthrough(sequence))
+                        out.extend(self._sequence(sequence))
                 continue
             if byte == 27:
                 self.escape.append(byte)
+                self.escape_started = time.monotonic()
             else:
                 out.extend(self._step(byte))
         return bytes(out)
 
+    def expire(self, now=None):
+        now = time.monotonic() if now is None else now
+        limit = .06 if self.escape == b"\x1b" else 1.5
+        if self.escape and self.escape_started is not None and now - self.escape_started >= limit:
+            return self.flush_escape()
+        return b""
+
     def flush_escape(self):
-        # Only a lone Esc is a Meltype key. Partial control sequences are left alone.
         if not self.escape:
             return b""
         pending = bytes(self.escape)
@@ -195,7 +233,6 @@ def _size_to_child(master):
 
 
 def write_all(fd, value):
-    """Write known remaining bytes only; on failure the effect is UNKNOWN."""
     offset = 0
     while offset < len(value):
         written = os.write(fd, value[offset:])
@@ -204,37 +241,83 @@ def write_all(fd, value):
         offset += written
 
 
-def run(argv, make_native):
-    """A single bound child PTY: input never rebinds to a bcon active pane.
+def _reap(pid):
+    """Only this owned child, bounded waits, never retry a user input effect."""
+    for sig in (None, signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):
+        try:
+            found, status = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return 0
+        if found:
+            return status
+        if sig is not None:
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + .2
+        while time.monotonic() < deadline:
+            found, status = os.waitpid(pid, os.WNOHANG)
+            if found:
+                return status
+            time.sleep(.005)
+    raise UnsafeEffect("owned child did not exit after SIGKILL")
 
-    NativeAOT is initialized only in the parent *after* fork, never inherited
-    across fork with its runtime already initialized.
+
+def run(argv, make_native):
+    """Fork before NativeAOT, but exec only after initialization succeeds.
+
+    The pipe gates only startup. No credentials, input replay, global daemon,
+    process registry, or command rewriting. The child inherits the original TTY.
     """
     if not os.isatty(0) or not os.isatty(1):
         raise UnsafeEffect("requires an interactive TTY")
-    pid, master = pty.fork()
-    if pid == 0:
-        os.execvp(argv[0], argv)
     original = termios.tcgetattr(0)
-    old_winch = signal.getsignal(signal.SIGWINCH)
+    reader, writer = os.pipe()
+    try:
+        pid, master = pty.fork()
+    except BaseException:
+        os.close(reader)
+        os.close(writer)
+        raise
+    if pid == 0:
+        try:
+            os.close(writer)
+            if os.read(reader, 1) != b"1":
+                os._exit(125)
+            os.close(reader)
+            os.execvp(argv[0], argv)
+        except BaseException:
+            os._exit(127)
+    os.close(reader)
     native = None
-    status = None
+    old_handlers = {}
+    status = 0
+    def interrupted(signum, _frame):
+        raise InterruptedError(f"signal {signum}")
     try:
         native = make_native()
         bridge = InputBridge(native)
-        signal.signal(signal.SIGWINCH, lambda *_: _size_to_child(master))
+        for sig in (signal.SIGWINCH, signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            old_handlers[sig] = signal.getsignal(sig)
+            signal.signal(sig, (lambda *_: _size_to_child(master)) if sig == signal.SIGWINCH else interrupted)
         _size_to_child(master)
         tty.setraw(0)
+        os.write(writer, b"1")
+        os.close(writer)
+        writer = None
         while True:
-            ready, _, _ = select.select([0, master], [], [], 0.06)
-            if not ready and bridge.escape:
-                data = bridge.flush_escape()
-                if data:
-                    write_all(master, data)
+            ready, _, _ = select.select([0, master], [], [], .02)
+            # The escape deadline is independent of child-output activity.
+            effect = bridge.expire()
+            if effect:
+                write_all(master, effect)
             if master in ready:
                 try:
                     data = os.read(master, 65536)
-                except OSError:
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
                     break
                 if not data:
                     break
@@ -247,16 +330,20 @@ def run(argv, make_native):
                 if effect:
                     write_all(master, effect)
     finally:
-        termios.tcsetattr(0, termios.TCSADRAIN, original)
-        signal.signal(signal.SIGWINCH, old_winch)
-        os.close(master)
-        if native is not None:
-            native.close()
+        # Restoration and reap are not skipped even if another cleanup fails.
+        if writer is not None:
+            os.close(writer)
         try:
-            os.kill(pid, signal.SIGHUP)
-        except ProcessLookupError:
-            pass
-        _, status = os.waitpid(pid, 0)
+            termios.tcsetattr(0, termios.TCSANOW, original)
+        finally:
+            for sig, handler in old_handlers.items():
+                signal.signal(sig, handler)
+            os.close(master)
+            try:
+                if native is not None:
+                    native.close()
+            finally:
+                status = _reap(pid)
     return os.waitstatus_to_exitcode(status)
 
 
@@ -274,6 +361,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (UnsafeEffect, FileNotFoundError) as error:
+    except (UnsafeEffect, OSError) as error:
         print(f"meltype-tty: {error}", file=sys.stderr)
         sys.exit(1)
