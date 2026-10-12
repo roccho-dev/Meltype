@@ -380,7 +380,8 @@ def run(argv, make_native, make_display=None):
             old_handlers[sig] = signal.getsignal(sig)
             signal.signal(sig, resize if sig == signal.SIGWINCH else interrupted)
         _size_to_child(master)
-        tty.setraw(0)
+        # Preserve keystrokes already queued while NativeAOT initialized.
+        tty.setraw(0, termios.TCSANOW)
         typeahead=display.initialize(lambda data: write_all(1,data)) if display is not None else b""
         os.write(writer, b"1")
         os.close(writer)

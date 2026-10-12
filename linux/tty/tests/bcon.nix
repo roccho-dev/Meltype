@@ -7,8 +7,18 @@ let
   };
   pkgs = import (resources + "/verification/pkgs.nix");
   bcon = pkgs.callPackage (resources + "/nixos/bcon.nix") { };
+  ops = builtins.fetchGit {
+    url = "https://github.com/roccho-org/ops.git";
+    rev = "9e6603324e5d7691dd06675c3267e887ce1e8915";
+  };
+  viewer = pkgs.callPackage (ops + "/packages/cdp-tty/default.nix") { };
+  page = pkgs.writeText "meltype-browser-proof.html" ''
+    <!doctype html><meta charset="utf-8"><title>Meltype Direct TTY proof</title>
+    <style>body{background:rgb(215,225,240);font:28px sans-serif}textarea{font:28px sans-serif;width:600px;height:120px}</style>
+    <h1>Existing browser target</h1><textarea id="editor" autofocus></textarea>
+  '';
   cjk = pkgs.noto-fonts-cjk-sans.override { static = true; };
-  python = pkgs.python3.withPackages (p: [ p.pillow ]);
+  python = pkgs.python3.withPackages (p: [ p.pillow p.websocket-client ]);
   product = pkgs.stdenvNoCC.mkDerivation {
     pname = "meltype-tty-trial";
     version = "0";
@@ -42,16 +52,29 @@ let
   '';
 in pkgs.testers.runNixOSTest {
   name = "meltype-direct-tty-bcon";
-  globalTimeout = 180;
+  globalTimeout = 240;
   extraPythonPackages = p: [ p.pillow ];
   nodes.machine = { ... }: {
-    virtualisation.memorySize = 2048;
+    virtualisation.memorySize = 3072;
     virtualisation.cores = 2;
     hardware.graphics.enable = true;
     services.dbus.enable = true;
     fonts.packages = [ pkgs.noto-fonts cjk ];
-    environment.systemPackages = [ bcon product python pkgs.kbd pkgs.procps ];
+    environment.systemPackages = [ bcon product viewer python pkgs.kbd pkgs.procps ];
     environment.etc."bcon/config.toml".text = "[terminal]\nime = false\n";
+    users.groups.browser-proof = { };
+    users.users.browser-proof = { isSystemUser = true; group = "browser-proof"; };
+    # Test-owned browser exists before the viewer attaches. No user auth/profile.
+    systemd.services.meltype-test-browser = {
+      wantedBy = [ "multi-user.target" ];
+      environment.HOME = "/run/meltype-test-browser";
+      serviceConfig = {
+        User = "browser-proof";
+        RuntimeDirectory = "meltype-test-browser";
+        ExecStart = "${pkgs.chromium}/bin/chromium --headless --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --user-data-dir=/run/meltype-test-browser/profile --window-size=800,600 file://${page}";
+        Restart = "no";
+      };
+    };
     services.logind.settings.Login = { NAutoVTs = 1; ReserveVT = 1; };
     systemd.services."getty@tty2".enable = false;
     systemd.services.meltype-test-console = {
