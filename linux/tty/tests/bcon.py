@@ -14,7 +14,6 @@ machine.wait_until_succeeds("pgrep -x login")
 machine.send_chars("root\n")
 machine.wait_until_succeeds("pgrep -t pts/0 -x bash")
 machine.succeed("mkdir -p /run/meltype-proof")
-original=machine.succeed("stty -F /dev/pts/0 -g").strip()
 # The sink records the real child's input. It never supplies candidates,
 # terminal replies, or injected Meltype input.
 sink="""import os,tty
@@ -28,7 +27,9 @@ Path('/run/meltype-proof/input').write_bytes(value)
 os.write(1,b'\\r\\nSINK:'+value.hex().encode()+b'\\r\\n')
 """
 machine.succeed("printf %s "+shlex.quote(sink)+" > /run/meltype-proof/sink.py")
-machine.send_chars("meltype-tty -- python3 /run/meltype-proof/sink.py 2>/run/meltype-proof/errors; printf '%s' $? > /run/meltype-proof/exit\n")
+# Compare the same foreground-command phase. Readline changes termios while
+# waiting at the prompt, so a remote pre-command snapshot is a false oracle.
+machine.send_chars("stty -g > /run/meltype-proof/termios-before; meltype-tty -- python3 /run/meltype-proof/sink.py 2>/run/meltype-proof/errors; rc=$?; stty -g > /run/meltype-proof/termios-after; printf '%s' \"$rc\" > /run/meltype-proof/exit\n")
 machine.wait_until_succeeds("test -e /run/meltype-proof/ready")
 
 def scanout(name):
@@ -59,7 +60,9 @@ machine.wait_until_succeeds("test -e /run/meltype-proof/exit")
 observed=machine.succeed("od -An -tx1 -v /run/meltype-proof/input").split()
 assert "".join(observed)=="ニホンゴ".encode().hex(), observed
 assert machine.succeed("cat /run/meltype-proof/exit").strip()=="0"
-assert machine.succeed("stty -F /dev/pts/0 -g").strip()==original
+original=machine.succeed("cat /run/meltype-proof/termios-before").strip()
+restored=machine.succeed("cat /run/meltype-proof/termios-after").strip()
+assert restored==original, {"before":original,"after":restored}
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk'")
 after=scanout("bcon-after-commit")
 assert panel_pixels(after)<panel_pixels(shown), "candidate image survived completion"
