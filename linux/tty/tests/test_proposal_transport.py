@@ -20,7 +20,12 @@ class TransportTests(unittest.TestCase):
                 self.send_response(status)
                 for key,value in headers.items(): self.send_header(key,value)
                 self.end_headers()
-                try: self.wfile.write(body)
+                try:
+                    if isinstance(body,bytes): self.wfile.write(body)
+                    else:
+                        for part in body:
+                            self.wfile.write(part)
+                            self.wfile.flush()
                 except (BrokenPipeError,ConnectionResetError): pass
             def log_message(self,*_): pass
         server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
@@ -75,8 +80,21 @@ class TransportTests(unittest.TestCase):
                 _,body=self.result(t)
                 self.assertEqual(json.loads(body)['error'],'UNAVAILABLE')
 
+    def test_trickled_response_has_a_total_deadline(self):
+        stop=threading.Event()
+        def trickle():
+            while not stop.wait(.04): yield b'x'
+        t=ProposalTransport(self.server(lambda q:(200,{},trickle())))
+        self.addCleanup(stop.set)
+        self.addCleanup(t.close)
+        started=time.monotonic()
+        t.submit({'generation':8,'raw':'u'})
+        _,body=self.result(t)
+        self.assertEqual(json.loads(body)['error'],'UNAVAILABLE')
+        self.assertLess(time.monotonic()-started,2.8,'a socket idle timeout is not a request deadline')
+
     def test_nonlocal_or_credentialed_urls_never_start(self):
-        for url in ['https://example.org/','http://example.org','http://a:b@127.0.0.1/','file:///tmp/data','http://127.0.0.1/#secret']:
+        for url in ['https://example.org/','http://example.org','http://a:b@127.0.0.1/','file:///tmp/data','http://127.0.0.1/#secret','http://127.0.0.1:0/','http://127.0.0.1:65536/']:
             with self.subTest(url=url),self.assertRaises(ValueError): ProposalTransport(url)
 
 if __name__=='__main__': unittest.main()
