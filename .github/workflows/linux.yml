@@ -1,6 +1,6 @@
 name: linux
 
-# Linux版の既存buildと同じ配布物からDirect TTYを試験する。
+# Same-package native/PTY proof and actual bcon NixOS test VM are separate gates.
 on:
   workflow_dispatch:
   push:
@@ -17,12 +17,13 @@ on:
 jobs:
   app:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
-      - name: Direct TTY transport proof (Python / POSIX PTY)
-        run: python3 -m unittest discover -s linux/tty/tests -v
       - name: Check Python
         run: python3 -c "import ast; ast.parse(open('linux/ibus-engine-meltype', encoding='utf-8').read())"
       - uses: actions/setup-dotnet@v4
@@ -31,8 +32,10 @@ jobs:
       - name: Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld pkg-config zlib1g-dev python3 \
+          sudo apt-get install -y clang lld pkg-config zlib1g-dev python3 python3-pil fonts-noto-cjk \
             libdbus-1-dev libglib2.0-dev libgtk-3-dev libibus-1.0-dev libxcb-xfixes0-dev qt6-base-dev
+      - name: Direct TTY transport, graphics and key regressions
+        run: python3 -m unittest discover -s linux/tty/tests -v
       - uses: actions/cache@v4
         with:
           path: |
@@ -51,10 +54,11 @@ jobs:
         run: BAZEL="$HOME/tools/bazelisk" native/mozc/build-mozc-helper.sh "$HOME/mozc" "$HOME/bazel-cache"
       - name: Build
         run: linux/build.sh
-      - name: Same-package real NativeAOT, Mozc and PTY
+      - name: Same-package real NativeAOT, Mozc, PTY and candidate image transport
         run: |
           python3 -m unittest discover -s linux/build/Meltype-linux/tty/tests -v
           python3 linux/build/Meltype-linux/tty/tests/native_tty.py "$PWD/linux/build/Meltype-linux"
+          python3 linux/build/Meltype-linux/tty/tests/native_display.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then name="Meltype-${GITHUB_REF_NAME#v}-linux.zip"; else name="Meltype-linux-test-$(date +%Y%m%d-%H%M).zip"; fi
@@ -64,6 +68,27 @@ jobs:
         with:
           name: meltype-linux
           path: linux/build/Meltype-*.zip
+      - name: Require real KVM for bcon test
+        run: test -c /dev/kvm
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+        with:
+          extra_nix_config: |
+            system-features = nixos-test kvm big-parallel
+      - name: Actual bcon NixOS VT, candidate scanout, child input and terminal recovery
+        run: |
+          set -o pipefail
+          nix-instantiate --parse linux/tty/tests/bcon.nix > /dev/null
+          nix-build linux/tty/tests/bcon.nix --argstr packagePath "$PWD/linux/build/Meltype-linux" \
+            -o "$RUNNER_TEMP/meltype-bcon" --show-trace 2>&1 | tee "$RUNNER_TEMP/meltype-bcon.log"
+      - name: Keep bcon scanout evidence distinct from controlled transport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meltype-bcon-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/meltype-bcon.log
+            ${{ runner.temp }}/meltype-bcon/*.png
+          if-no-files-found: warn
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:

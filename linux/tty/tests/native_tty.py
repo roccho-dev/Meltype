@@ -89,6 +89,12 @@ class NativeProof(unittest.TestCase):
         self.assertEqual(self.send(raw), '日本語'.encode()+raw)
         self.assertIsNone(self.bridge.view)
 
+    def test_kitty_encoded_keys_share_the_native_conversion(self):
+        sequence=b''.join(f'\x1b[{c};1:1u\x1b[{c};1:3u'.encode() for c in b'nihongo ')
+        self.assertEqual(self.send(sequence),b'')
+        self.assertEqual(self.bridge.view['text'],'日本語')
+        self.assertEqual(self.send(b'\x1b[13u'),'日本語'.encode())
+
     def test_terminal_report_does_not_commit_real_composition(self):
         self.send(b'nihongo')
         self.assertEqual(self.send(b'\x1b[12;34R'), b'\x1b[12;34R')
