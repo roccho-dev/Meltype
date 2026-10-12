@@ -154,6 +154,12 @@ public sealed class MeltypeSession
         return new MeltypeSession(detector, converter, options, () => settings);
     }
 
+    /// <summary>同じ入力スレッドから既存の共通Proposal portを接続する。未接続なら従来動作のまま。</summary>
+    public void AttachProposals(IProposalPort? port) => _controller.AttachProposals(port);
+
+    /// <summary>非同期応答の表示だけを取得する。以前の確定文字を再送しない。</summary>
+    public SessionResult ProposalView() => new(true, [], _host.CurrentView);
+
     /// <summary>英数 (直接入力) か。true の間はキーをすべてアプリに渡す (Mac の「英数」キー、「かな」キーで戻す)。</summary>
     public bool Direct { get; set; }
 
@@ -231,6 +237,8 @@ public sealed class MeltypeSession
         private bool _hidden;
 
         public bool ReplayedCurrent { get; private set; }
+
+        public CompositionView? CurrentView => _hidden ? null : _view;
 
         public void Begin(char? ch, bool shift, string? before, string? after)
         {

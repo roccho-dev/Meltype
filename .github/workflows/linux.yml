@@ -59,6 +59,7 @@ jobs:
           python3 -m unittest discover -s linux/build/Meltype-linux/tty/tests -v
           python3 linux/build/Meltype-linux/tty/tests/native_tty.py "$PWD/linux/build/Meltype-linux"
           python3 linux/build/Meltype-linux/tty/tests/native_display.py "$PWD/linux/build/Meltype-linux"
+          python3 linux/build/Meltype-linux/tty/tests/native_proposals.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then name="Meltype-${GITHUB_REF_NAME#v}-linux.zip"; else name="Meltype-linux-test-$(date +%Y%m%d-%H%M).zip"; fi

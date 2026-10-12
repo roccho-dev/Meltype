@@ -4,7 +4,8 @@
 
 No Fcitx5, IBus, or SKK. This is a *transport proof*, not a production IME:
 The Kitty image candidate overlay is opt-in via an existing CJK font.
-There is no Proposal endpoint or unproven surrounding-text editing.
+The existing Proposal port is optional via an explicit local HTTP endpoint.
+Surrounding-text editing remains unsupported without an observed capability.
 Real NativeAOT, Mozc and bound-PTY tests are separate from visual bcon proof.
 Unsupported edits stop before writing to the child. Use only in a disposable PTY.
 """
@@ -34,7 +35,7 @@ class UnsafeEffect(RuntimeError):
 class NativeSession:
     """Thin binding to Meltype's existing C ABI (same exports as Linux IBus)."""
 
-    def __init__(self, library: Path, mozc: Path):
+    def __init__(self, library: Path, mozc: Path, proposal_url=None):
         if not library.is_file() or not mozc.is_file():
             raise FileNotFoundError("MeltypeNative.so and Mozc helper must both exist")
         self.lib = ctypes.CDLL(str(library.resolve()))
@@ -54,6 +55,52 @@ class NativeSession:
         if not self.session:
             raise UnsafeEffect("Meltype native session unavailable")
         self.lib.meltype_set_direct(self.session, 0)
+        self.proposal = None
+        self.transport = None
+        self.target = ""
+        if proposal_url is not None:
+            try:
+                from proposal_transport import ProposalTransport
+                self.lib.meltype_proposals_create.argtypes = [ctypes.c_void_p]
+                self.lib.meltype_proposals_create.restype = ctypes.c_void_p
+                self.lib.meltype_proposals_destroy.argtypes = [ctypes.c_void_p]
+                self.lib.meltype_proposals_destroy.restype = None
+                self.lib.meltype_proposals_target.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+                self.lib.meltype_proposals_target.restype = None
+                self.lib.meltype_proposals_request.argtypes = [ctypes.c_void_p]
+                self.lib.meltype_proposals_request.restype = ctypes.c_void_p
+                self.lib.meltype_proposals_receive.argtypes = [ctypes.c_void_p, ctypes.c_longlong, ctypes.c_char_p]
+                self.lib.meltype_proposals_receive.restype = ctypes.c_void_p
+                self.lib.meltype_proposals_selected.argtypes = [ctypes.c_void_p]
+                self.lib.meltype_proposals_selected.restype = ctypes.c_void_p
+                self.proposal = self.lib.meltype_proposals_create(self.session)
+                if not self.proposal: raise UnsafeEffect("native Proposal port unavailable")
+                self.transport = ProposalTransport(proposal_url)
+            except BaseException:
+                self.close()
+                raise
+
+    def bind_target(self, token):
+        self.target = token
+        self.focus(True)
+
+    def focus(self, active):
+        if self.proposal:
+            self.lib.meltype_proposals_target(self.proposal, self.target.encode() if active else b"")
+
+    def poll_proposals(self):
+        if not self.proposal: return None
+        pointer = self.lib.meltype_proposals_request(self.proposal)
+        if pointer: self.transport.submit(self._result(pointer))
+        response = self.transport.take()
+        if response is None: return None
+        generation, text = response
+        return self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode()))
+
+    def take_selection(self):
+        if not self.proposal: return None
+        pointer = self.lib.meltype_proposals_selected(self.proposal)
+        return self._result(pointer) if pointer else None
 
     def _result(self, pointer):
         if not pointer:
@@ -73,6 +120,12 @@ class NativeSession:
         return self._result(self.lib.meltype_commit(self.session))
 
     def close(self):
+        if self.transport is not None:
+            self.transport.close()
+            self.transport = None
+        if self.proposal:
+            self.lib.meltype_proposals_destroy(self.proposal)
+            self.proposal = None
         if self.session:
             self.lib.meltype_destroy(self.session)
             self.session = None
@@ -166,6 +219,10 @@ class InputBridge:
         return raw
 
     def _sequence(self, raw):
+        if raw in (b"\x1b[I", b"\x1b[O"):
+            focus = getattr(self.native, "focus", None)
+            if focus is not None: focus(raw == b"\x1b[I")
+            return raw  # A focus notification is never a text commit.
         # Cursor/device/graphics replies are not user commands. Never commit
         # composition just because a terminal answered the child's query.
         if re.fullmatch(rb"\x1b\[(?:\??[0-9;]*[Rcnt]|\?[0-9;]+u)", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")):
@@ -352,11 +409,20 @@ def run(argv, make_native, make_display=None):
     try:
         native = make_native()
         bridge = InputBridge(native)
+        bind = getattr(native, "bind_target", None)
+        if bind is not None:
+            stat = os.fstat(master)
+            bind(f"pty:{stat.st_dev}:{stat.st_ino}:child:{pid}")
         if make_display is not None:
             display = make_display()
             bridge.on_report = display.reply
 
         def refresh():
+            poll = getattr(native, "poll_proposals", None)
+            result = poll() if poll is not None else None
+            if result is not None:
+                if effect_bytes(result): raise UnsafeEffect("provider response attempted an unselected effect")
+                bridge.view = result.get("view")
             if display is None: return
             write_all(1, display.update(bridge.view))
             bridge.paused = bool(bridge.view is not None and (display.cursor is None or not display.boundary.safe))
@@ -450,7 +516,7 @@ def main():
         size=os.get_terminal_size(0)
         return KittyDisplay(args.font, size.lines, size.columns)
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
-               lambda: NativeSession(args.native, args.mozc),
+               lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
                make_display if args.font is not None else None)
 
 

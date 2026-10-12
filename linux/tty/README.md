@@ -25,7 +25,8 @@ flowchart TB
 
 ## Implementation
 
-The Core/Windows/IBus sources are unchanged. NativeAOT initializes after fork;
+The conversion algorithm and Windows/IBus entry points are unchanged. The session
+adds only attachment to its existing Proposal port and a view-only snapshot. NativeAOT initializes after fork;
 a startup pipe holds child exec until native, font and graphics-capability checks
 succeed. An unsupported terminal does not silently run invisible composition.
 Paste cannot overtake pending composition. Cursor/device/graphics replies are
@@ -49,9 +50,9 @@ optimality. A concrete failed case can require revisiting the choice.
 ## Same-build checks and delivery
 
 linux/build.sh includes tty source/tests with the same NativeAOT library and Mozc
-helper. The existing workflow requires 51 controlled regression tests, nine real
-Core/Mozc/bound-PTY cases, and a real CLI/native/PTY/PNG transport test before ZIP
-upload. Real-native cases use fresh processes and temporary HOME/XDG paths so
+helper. The existing workflow requires controlled regression tests, nine real
+Core/Mozc/bound-PTY cases, a real CLI/native/PTY/PNG transport test, and six real
+NativeAOT typed-Proposal cases before ZIP upload. Real-native cases use fresh processes and temporary HOME/XDG paths so
 learning/path caches cannot contaminate another case. Missing real artifacts fail.
 The CLI test records hashes and checks candidate images, selected child text, exit
 status and restored termios. Its terminal replies are controlled, not actual bcon.
@@ -68,14 +69,47 @@ the child command. Python 3, Pillow and an existing CJK font are runtime depende
 No fonts are copied into the product. --transport-proof explicitly allows nonvisual
 transport tests only. Do not use the experimental entry around valuable work.
 
+## Optional typed Proposal connection
+
+MELTYPE_PROPOSAL_URL explicitly enables the existing local HTTP provider contract:
+request generation/raw; response generation/raw/proposals with original id,
+representation, typed meaning and evidence. Without that variable, this path
+makes no network request and the conversion behavior is unchanged. Captured input
+is sent to the configured local provider only when enabled. No credentials,
+redirects, environment proxy or nonlocal endpoint are used by this transport.
+
+HTTP runs outside the key thread with one inflight request, one replaceable pending
+request and one result. All native callbacks run back on the input thread. The
+existing Core owns candidate generation, cancel, ABA and one-time selection; no
+second ranker is added. The native port retains the original typed selection,
+available through take_selection; it is a selection, not a downstream effect receipt.
+
+The native port binds a query to the fixed child PTY and its target epoch. Unknown
+or changed targets, including a target changed away and back, refuse selection.
+This does not turn a PTY token into proof of a browser/GUI caret; applications that
+change invisible fields require their own observed edit capability. Control-bearing
+candidate text is refused rather than executed as a terminal command. Native
+Undo, arbitrary multiline edits and deletion of already committed text are not
+claimed by this restricted transport.
+
+## Verified milestone and scope
+
+At d610408, Linux CI 38239972011 passed the actual bcon NixOS VM candidate
+scanout, selection, child text, same-phase terminal restoration, and unchanged
+cdp-tty attachment to a test-owned existing Chrome target. Japanese DOM text,
+viewer exit and retained browser PID/target were read back. The production user
+browser and physical laptop were not used. Later source changes require their own
+same-head checks; this milestone is not transferred by assertion.
+
 ## Remaining acceptance
 
 - Actual bcon pipeline result and visual review; a configured job is not a PASS.
 - Safe native deleteBefore/reconversion and supported multiline editing: still
   rejected, not emulated with unverified shell backspaces. Native Undo unproven.
-- Linux typed Proposal port: original ID/type, generation/cancel and one-shot choice.
+- Same-build native/HTTP Proposal tests and independent integration review of the
+  configured real provider; fixed-PTY identity is not universal caret identity.
 - App mode/focus/VT changes and extended-key edge cases beyond the fixed tests.
-- Existing cdp-tty → same existing Headless Chrome target: Japanese DOM readback.
+- Preserve the bcon → existing cdp-tty → existing test Chrome DOM proof on each head.
 - Independent same-version review; self-checks are not an independent R.
 
 Initial implementation and bcon evidence stay in this Meltype PR. resources owns
