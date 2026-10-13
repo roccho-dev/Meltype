@@ -49,11 +49,18 @@ public static unsafe class ProposalExports
         private static bool SafeText(string? text) =>
             !string.IsNullOrEmpty(text) && text.Length <= 65536 && !text.Any(char.IsControl);
 
+        // The terminal adapter can insert text, not execute an opaque action.
+        // Keep this admission rule here; Core still owns rank and selection.
+        private static bool TextMeaning(JsonElement meaning) =>
+            meaning.ValueKind == JsonValueKind.Object &&
+            meaning.TryGetProperty("kind", out var kind) &&
+            kind.ValueKind == JsonValueKind.String && kind.GetString() == "text";
+
         public bool CanApply(ProposalSelection selection)
         {
             var allowed = _target.Length != 0 && _queryEpoch == _epoch &&
                 Current is { } current && current.Generation == selection.Generation && current.Raw == selection.Raw &&
-                SafeText(selection.Candidate.Representation);
+                SafeText(selection.Candidate.Representation) && TextMeaning(selection.Candidate.Meaning);
             Current = Pending = null;
             _receive = null;
             return allowed;
@@ -84,10 +91,11 @@ public static unsafe class ProposalExports
                     {
                         var id = item.GetProperty("id").GetString();
                         var text = item.GetProperty("representation").GetString();
+                        var meaning = item.GetProperty("meaning");
                         if (string.IsNullOrWhiteSpace(id) || id.Length > 1024 ||
-                            !SafeText(text))
+                            !SafeText(text) || !TextMeaning(meaning))
                             throw new FormatException();
-                        candidates.Add(new(id, text!, item.GetProperty("meaning").Clone(), item.GetProperty("evidence").Clone()));
+                        candidates.Add(new(id, text!, meaning.Clone(), item.GetProperty("evidence").Clone()));
                     }
                 }
                 response = new(query.Generation, query.Raw, candidates, error);

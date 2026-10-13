@@ -15,6 +15,17 @@ machine.wait_until_succeeds("pgrep -x login")
 machine.send_chars("root\n")
 machine.wait_until_succeeds("pgrep -t pts/0 -x bash")
 machine.succeed("mkdir -p /run/meltype-proof")
+
+# Fixture setup is not text under test. Do not type a long shell program into
+# an asynchronously redrawn terminal: launch a prepared script with one short
+# physical command, then send only the specified product input via the keyboard.
+def launch_trial(name, command):
+    prefix = "/run/meltype-proof/" + name
+    script = (f"stty -g > {prefix}-before\n"
+        f"{command} 2>{prefix}-errors\nrc=$?\n"
+        f"stty -g > {prefix}-after\nprintf '%s' \"$rc\" > {prefix}-exit\n")
+    machine.succeed("printf %s " + shlex.quote(script) + " > " + prefix + "-trial")
+    machine.send_chars("bash " + prefix + "-trial\n")
 # The sink records the real child's input. It never supplies candidates,
 # terminal replies, or injected Meltype input.
 sink="""import os,tty
@@ -32,7 +43,7 @@ os.write(1,b'\\r\\nSINK:'+value.hex().encode()+b'\\r\\n')
 machine.succeed("printf %s "+shlex.quote(sink)+" > /run/meltype-proof/sink.py")
 # Compare the same foreground-command phase. Readline changes termios while
 # waiting at the prompt, so a remote pre-command snapshot is a false oracle.
-machine.send_chars("stty -g > /run/meltype-proof/termios-before; meltype-tty -- python3 /run/meltype-proof/sink.py 2>/run/meltype-proof/errors; rc=$?; stty -g > /run/meltype-proof/termios-after; printf '%s' \"$rc\" > /run/meltype-proof/exit\n")
+launch_trial("native", "meltype-tty -- python3 /run/meltype-proof/sink.py")
 machine.wait_until_succeeds("test -e /run/meltype-proof/ready")
 
 def scanout(name):
@@ -51,7 +62,7 @@ deadline=time.monotonic()+15
 while True:
     shown=scanout("bcon-candidates")
     if panel_pixels(shown)>panel_pixels(before)+1000: break
-    assert time.monotonic()<deadline, machine.succeed("cat /run/meltype-proof/errors")
+    assert time.monotonic()<deadline, machine.succeed("cat /run/meltype-proof/native-errors")
     time.sleep(.2)
 machine.succeed("test ! -s /run/meltype-proof/input")
 machine.send_key("down")
@@ -59,12 +70,12 @@ time.sleep(.5)
 chosen=scanout("bcon-selected")
 assert ImageChops.difference(shown,chosen).getbbox(), "selection did not change actual scanout"
 machine.send_key("ret")
-machine.wait_until_succeeds("test -e /run/meltype-proof/exit")
+machine.wait_until_succeeds("test -e /run/meltype-proof/native-exit")
 observed=machine.succeed("od -An -tx1 -v /run/meltype-proof/input").split()
 assert "".join(observed)=="ニホンゴ".encode().hex(), observed
-assert machine.succeed("cat /run/meltype-proof/exit").strip()=="0"
-original=machine.succeed("cat /run/meltype-proof/termios-before").strip()
-restored=machine.succeed("cat /run/meltype-proof/termios-after").strip()
+assert machine.succeed("cat /run/meltype-proof/native-exit").strip()=="0"
+original=machine.succeed("cat /run/meltype-proof/native-before").strip()
+restored=machine.succeed("cat /run/meltype-proof/native-after").strip()
 assert restored==original, {"before":original,"after":restored}
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk'")
 after=scanout("bcon-after-commit")
@@ -110,7 +121,7 @@ def browser_value(expected):
     return 'python3 /run/meltype-proof/browser-probe.py '+shlex.quote(expected)
 machine.wait_until_succeeds(browser_value(''))
 browser_pid=machine.succeed('systemctl show -p MainPID --value meltype-test-browser').strip()
-machine.send_chars('stty -g > /run/meltype-proof/browser-before; meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)" 2>/run/meltype-proof/browser-errors; rc=$?; stty -g > /run/meltype-proof/browser-after; printf %s "$rc" > /run/meltype-proof/browser-exit\n')
+launch_trial("browser", 'meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)"')
 
 def color_pixels(im,color):
     return sum(count for count,rgb in im.getcolors(im.width*im.height)
@@ -127,7 +138,7 @@ def wait_scanout(name,check):
             png=(Path(machine.out_dir)/(name+'.png')).read_bytes()
             assert len(png)<=1024*1024
             print('MELTYPE_FAILURE_PNG '+name+' '+base64.b64encode(png).decode(),flush=True)
-            print(machine.succeed("ps -eo pid,ppid,tty,args; cat /run/meltype-proof/browser-errors; cat /run/meltype-proof/native-trace 2>/dev/null || true; cat /run/meltype-proof/proposal-query 2>/dev/null || true"),flush=True)
+            print(machine.succeed("ps -eo pid,ppid,tty,args; cat /run/meltype-proof/*-errors; cat /run/meltype-proof/*-exit; cat /run/meltype-proof/native-trace 2>/dev/null || true; cat /run/meltype-proof/proposal-query 2>/dev/null || true"),flush=True)
             raise AssertionError('actual browser scanout not observed: '+name)
         time.sleep(.2)
 
@@ -190,7 +201,7 @@ def profile(frame,event,result):
 sys.setprofile(profile)
 '''
 machine.succeed('mkdir -p /run/meltype-proof/trace; printf %s '+shlex.quote(trace)+' > /run/meltype-proof/trace/sitecustomize.py')
-machine.send_chars('stty -g > /run/meltype-proof/typed-before; PYTHONPATH=/run/meltype-proof/trace MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)" 2>/run/meltype-proof/browser-errors; rc=$?; stty -g > /run/meltype-proof/typed-after; printf %s "$rc" > /run/meltype-proof/typed-exit\n')
+launch_trial("typed", 'PYTHONPATH=/run/meltype-proof/trace MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- cdp-tty "$(cat /run/meltype-proof/browser-ws)"')
 base=wait_scanout('typed-browser-before',lambda im:color_pixels(im,(215,225,240))>2000)
 machine.send_chars('u')
 # Native "u" preedit alone is one 600x52 image. Require the taller real

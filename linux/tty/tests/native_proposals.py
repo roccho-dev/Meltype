@@ -92,6 +92,16 @@ class NativeProposalProof(unittest.TestCase):
         self.send(b'\x1b[21~')  # F10 recovers the original raw spelling, not provider text.
         self.assertEqual(self.send(b'\r'),b'u')
         self.assertIsNone(self.native.take_selection())
+    def test_nontext_proposal_cannot_become_a_terminal_commit(self):
+        self.send(b'u');q=self.query()
+        action=self.candidate('action','shown as harmless text')
+        action['meaning']={'kind':'action','name':'some-action'}
+        self.response(q,[action])
+        self.assertFalse(self.bridge.view['candidates'],'an action is not a text insertion')
+        self.assertIsNone(self.native.take_selection())
+        self.send(b'\x1b[21~')
+        self.assertEqual(self.send(b'\r'),b'u')
+        self.assertIsNone(self.native.take_selection())
     def test_real_http_response_reaches_core_without_blocking_key_thread(self):
         seen=[]
         class Handler(BaseHTTPRequestHandler):
