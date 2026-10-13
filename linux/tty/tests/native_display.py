@@ -54,7 +54,7 @@ def run_case(expected, prefix, provider=None):
             "os.write(1,b'\\x1b[10;4HREADY\\x1b[10;4H');v=b''\n"
             f"while len(v)<{length}:v+=os.read(0,{length}-len(v))\n"
             "os.write(1,b'SINK:'+v.hex().encode())")
-        args=[sys.executable,str(root/'meltype_tty.py'),'--native',str(pkg/'libMeltypeNative.so'),
+        args=[sys.executable,str(root/'meltype_tty.py'),'--raw-text','--native',str(pkg/'libMeltypeNative.so'),
             '--mozc',str(pkg/'mozc/meltype_mozc_helper'),'--font',font,
             '--',sys.executable,'-c',child]
         process=subprocess.Popen(args,stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)

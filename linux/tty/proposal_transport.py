@@ -40,6 +40,11 @@ class ProposalTransport:
             response, self.response = self.response, None
             return response
 
+    def cancel(self):
+        # The already-sent request cannot be recalled; its response becomes inert.
+        with self.condition:
+            self.pending = self.response = self.latest = None
+
     def close(self):
         with self.condition:
             self.closed = True

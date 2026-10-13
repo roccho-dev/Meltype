@@ -1,119 +1,84 @@
-# Direct TTY — existing Meltype Core, per-PTY input and Kitty candidate images
+# Direct TTY input — B / Meltype PR #3
 
-Goal: bcon IME OFF → existing Meltype NativeAOT/Mozc → one bound child PTY,
-without Fcitx5, IBus, SKK, a second language detector or a resources change.
-**Draft / PRODUCT_NOT_READY.** The implemented candidate-image path must pass
-actual bcon scanout acceptance; protocol/PNG tests alone are not that evidence.
+B is `bcon (IME OFF) ↔ Meltype ↔ a fixed child PTY running a Shell or Editor`.
+It has no Chrome/cdp-tty test dependency. Conversion remains the existing
+Meltype Core/NativeAOT/Mozc implementation. There is no SKK, Fcitx5, second
+ranker, daemon, or shadow terminal grid. Kitty images display candidates.
 
-```mermaid
-flowchart TB
-  subgraph HOST["Test host | no permanent configuration change"]
-    B["bcon | IME OFF"]
-    subgraph PRODUCT["Meltype | one bound child PTY"]
-      K["InputBridge | capture, retain and route"]
-      M["Existing NativeAOT and Mozc"]
-      U["KittyDisplay | transient owned candidate image"]
-      T["Bound child PTY | CLI / editor / cdp-tty"]
-      K <--> M
-      M --> U
-      K --> T
-      U -->|"image plane, no shadow text grid"| B
-    end
-    B --> K
-  end
-```
+## Source and ownership
 
-## Implementation
+Reuse: old PR #2 at `d673872560f7e6b3b20fed1452f6949c55c722f1`.
+The old PR and its Browser/DOM tests remain unchanged. Their receiver is
+resources #14 (C); B's input-only suite is not the combined product's proof.
+The split contract and original merge conditions are in `docs/split-direct-tty.md`
+and PR #3. Physical-host, independent-review and provider evidence remain distinct.
 
-The conversion algorithm and Windows/IBus entry points are unchanged. The session
-adds only attachment to its existing Proposal port and a view-only snapshot. NativeAOT initializes after fork;
-a startup pipe holds child exec until native, font and graphics-capability checks
-succeed. An unsupported terminal does not silently run invisible composition.
-Paste cannot overtake pending composition. Cursor/device/graphics replies are
-opaque, not a request to commit. Native candidate arrows and F6–F10 work during
-composition. Kitty CSI-u/modifyOtherKeys use the same Core; consumed key releases
-are suppressed, and unconsumed protocol bytes survive unchanged. Escape timing is
-independent of child output. Cleanup restores the terminal and reaps its own child.
+| Capability | Owner |
+| --- | --- |
+| Japanese/English recognition, preedit, selection, cancel | Existing Meltype Core |
+| Fixed child input route, keys, opaque paste, resize, exit | TTY adapter |
+| Edits before commit | Existing composition controls; child text is untouched |
+| Deletion, native Undo/Redo and newlines after commit | The child Editor; nano's actual file content is tested |
+| Unknown `deleteBefore`, universal reconversion of committed text | Not supported without an observed edit capability; no guessed backspaces |
 
-The Kitty display uses an existing CJK font with Pillow. It requests the actual
-cursor in serial order, pauses user input until that report is received, and does
-not forward later child output while its own query is pending. A finite boundary
-parser prevents insertion inside UTF-8/control/image sequences. Only one owned
-image is deleted; child cells, saved cursor slots and a full shadow grid are not
-owned or copied. Origin-relative cursor mode currently fails explicitly.
+The first Enter consumes pending conversion; a later Enter can submit a shell
+line or insert an Editor newline. The tests check that these are not confused.
 
-This is the bcon-specific alternative to copying ttyskk's SKK-coupled frontend:
-reuse bcon's graphics plane rather than maintain another terminal screen model.
-It is not a claim of universal VT/terminal compatibility or independently accepted
-optimality. A concrete failed case can require revisiting the choice.
+## Capture and privacy
 
-## Same-build checks and delivery
+Canonical input with ECHO disabled bypasses conversion and Proposal lookup.
+When capture becomes unavailable, pending composition and unsent/received
+Proposal work are cancelled. A request already sent cannot be recalled, but its
+response is invalidated. Privacy tests use fabricated strings, not credentials.
 
-linux/build.sh includes tty source/tests with the same NativeAOT library and Mozc
-helper. The existing workflow requires controlled regression tests, nine real
-Core/Mozc/bound-PTY cases, a real CLI/native/PTY/PNG transport test, and six real
-NativeAOT typed-Proposal cases before ZIP upload. Real-native cases use fresh processes and temporary HOME/XDG paths so
-learning/path caches cannot contaminate another case. Missing real artifacts fail.
-The CLI test records hashes and checks candidate images, selected child text, exit
-status and restored termios. Its terminal replies are controlled, not actual bcon.
+Raw no-echo input cannot be identified as an Editor versus a password field from
+the PTY alone. It therefore bypasses capture by default. `--raw-text` explicitly
+authorizes a known text app, as in the isolated Readline/nano trials; it is not a
+claim about every later field in an arbitrary app. Canonical no-echo protection
+still applies. Unobserved application-caret changes remain outside that guarantee.
 
-The additional standard NixOS VM test reuses the existing pinned resources bcon
-package read-only. It runs unchanged bcon on a real VM VT, sends virtual physical
-keys, takes QEMU scanout PNGs, reads actual child bytes and checks terminal recovery.
-Nix packaging adjusts ELF paths using standard autoPatchelfHook; this runtime
-adaptation is not called byte-identical to the Ubuntu artifact. No production
-configuration, credentials, browser profile, source or resources PR is changed.
+Entry flags: `--native`, `--mozc`, an existing CJK `--font`, and optionally
+`--raw-text` for a known text app. `--transport-proof` is explicitly nonvisual and
+for testing, not normal use. Font files are not copied into this repository.
 
-For disposable trials, the script takes --native, --mozc, --font and -- followed by
-the child command. Python 3, Pillow and an existing CJK font are runtime dependencies.
-No fonts are copied into the product. --transport-proof explicitly allows nonvisual
-transport tests only. Do not use the experimental entry around valuable work.
+## Optional shared Proposal port
 
-## Optional typed Proposal connection
+`MELTYPE_PROPOSAL_URL` explicitly enables local HTTP. With it unset, no provider
+request is sent. The wire is request `{generation, raw}` and response
+`{generation, raw, proposals}` preserving each original `id`, `representation`,
+`meaning`, and `evidence`. Only text meaning is inserted; action candidates are
+not terminal commands. The native port retains selection identity, not an effect
+or adoption receipt. Original ordering, generation/cancel/one-shot checks belong
+to the existing Core, not a second ranker here.
 
-MELTYPE_PROPOSAL_URL explicitly enables the existing local HTTP provider contract:
-request generation/raw; response generation/raw/proposals with original id,
-representation, typed meaning and evidence. Without that variable, this path
-makes no network request and the conversion behavior is unchanged. Captured input
-is sent to the configured local provider only when enabled. No credentials,
-redirects, environment proxy or nonlocal endpoint are used by this transport.
+There is one active request, one replaceable pending request and one response.
+Callbacks enter native code on the input thread. No credentials, redirects or
+proxies forward captured text. Changed/unknown target epochs reject selection;
+a fixed PTY identity is not evidence of an invisible GUI caret.
 
-HTTP runs outside the key thread with one inflight request, one replaceable pending
-request and one result. All native callbacks run back on the input thread. The
-existing Core owns candidate generation, cancel, ABA and one-time selection; no
-second ranker is added. The native port retains the original typed selection,
-available through take_selection; it is a selection, not a downstream effect receipt.
+`ops/packages/semcmp` at `29be7a2d33c85f99ac693dd51d2ecd6ebbbaf8fe` is the shared
+calculation source. Its README distinguishes controlled composition from real
+provider quality and public consumer wiring. The local HTTP fixtures here do
+not prove that external integration. Keep its required real binding as an explicit
+acceptance item rather than duplicating candidate production in Meltype.
 
-The native port binds a query to the fixed child PTY and its target epoch. Unknown
-or changed targets, including a target changed away and back, refuse selection.
-This does not turn a PTY token into proof of a browser/GUI caret; applications that
-change invisible fields require their own observed edit capability. Control-bearing
-candidate text is refused rather than executed as a terminal command. Native
-Undo, arbitrary multiline edits and deletion of already committed text are not
-claimed by this restricted transport.
+## Checks and evidence
 
-## Verified milestone and scope
+The Linux workflow runs exact-source regressions and same-build package checks:
+`test_*.py`, real Core/Mozc/PTY (`native_tty.py`), real CLI/native/PTY/PNG with
+controlled terminal replies (`native_display.py`), and real NativeAOT typed
+Proposal checks (`native_proposals.py`). Controlled replies are not bcon evidence.
 
-At d610408, Linux CI 38239972011 passed the actual bcon NixOS VM candidate
-scanout, selection, child text, same-phase terminal restoration, and unchanged
-cdp-tty attachment to a test-owned existing Chrome target. Japanese DOM text,
-viewer exit and retained browser PID/target were read back. The production user
-browser and physical laptop were not used. Later source changes require their own
-same-head checks; this milestone is not transferred by assertion.
+`bcon.nix`/`bcon.py` add a real unchanged bcon in a NixOS test VM with virtual
+physical keys and actual screenshots. The guest has Bash Readline and nano but
+no Chromium or cdp-tty. Tests check mixed input, candidate selection, native
+Editor deletion/Undo/Redo, multiple lines, local typed candidates, hidden input,
+and same-phase termios restoration. Learning/config paths are isolated per trial.
 
-## Remaining acceptance
+At B commit `8c9f009b6e0f9c421f957b4e8bd9ab68bf3ff3dd`, Linux run `38350288872`
+passed the input-only suite including Shell input and nano editing. Later source
+changes require their own same-head result; historical passes are not transferred.
 
-- Actual bcon pipeline result and visual review; a configured job is not a PASS.
-- Safe native deleteBefore/reconversion and supported multiline editing: still
-  rejected, not emulated with unverified shell backspaces. Native Undo unproven.
-- Same-build native/HTTP Proposal tests and independent integration review of the
-  configured real provider; fixed-PTY identity is not universal caret identity.
-- App mode/focus/VT changes and extended-key edge cases beyond the fixed tests.
-- Preserve the bcon → existing cdp-tty → existing test Chrome DOM proof on each head.
-- Independent same-version review; self-checks are not an independent R.
-
-Initial implementation and bcon evidence stay in this Meltype PR. resources owns
-later permanent NixOS installation/distribution/recovery changes only if needed.
-Design: https://github.com/roccho-dev/adrs/issues/618
-Browser ownership: https://github.com/roccho-dev/adrs/issues/615
-No merge, deployment, secret/profile change or old-edits retirement is claimed.
+B1–B7 in PR #3 remain the merge conditions. Independent review, needed physical
+host evidence, actual shared-provider binding, and C's verified migration are not
+implied by VM/fixture success. No merge, deployment or old-edits retirement occurs.

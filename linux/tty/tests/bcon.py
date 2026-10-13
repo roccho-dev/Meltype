@@ -109,6 +109,7 @@ import json
 class Handler(BaseHTTPRequestHandler):
  def do_POST(self):
   q=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+  with open('/run/meltype-proof/provider-requests','a') as log: log.write(json.dumps(q)+'\\n')
   rows=[{'id':id,'representation':text,'meaning':{'kind':'text'},'evidence':['local-test']} for id,text in [('a','甲候補'),('b','乙候補')]]
   payload=json.dumps({**q,'proposals':rows}).encode()
   self.send_response(200);self.end_headers();self.wfile.write(payload)
@@ -129,10 +130,23 @@ machine.fail("test -e /run/meltype-proof/typed-text")
 machine.send_key("ret")
 finished("typed")
 assert contents("typed-text") == "乙候補"
+# Canonical no-echo input is observed by the product, not declared safe by
+# the fixture. Even the known-raw-text test wrapper must bypass this input.
+requests_before = contents("provider-requests")
+reader = put("read-hidden", "stty -echo\n touch /run/meltype-proof/hidden-ready\n"
+    "IFS= read -r value\nprintf %s \"$value\" > /run/meltype-proof/hidden-text\n")
+launch("hidden", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- bash --noprofile --norc " + reader)
+machine.wait_until_succeeds("test -e /run/meltype-proof/hidden-ready")
+hidden_before = scanout("B-hidden-before")
+machine.send_chars("not-a-real-password\n")
+finished("hidden")
+assert contents("hidden-text") == "not-a-real-password"
+assert contents("provider-requests") == requests_before
+scanout("B-hidden-after")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "shell":"hello 日本語","editor":"日本語\\nhello","typed":"乙候補",
-    "editor_delete_undo_redo":True,"terminal_restored":True,
+    "editor_delete_undo_redo":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
     "provider":"LOCAL_FIXTURE","physical_host":"NOT_RUN","independent_review":"NOT_RUN",
     "screenshots":{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(machine.out_dir).glob('B-*.png')}},ensure_ascii=False),flush=True)

@@ -85,6 +85,7 @@ class NativeSession:
         self.focus(True)
 
     def focus(self, active):
+        if not active and self.transport is not None: self.transport.cancel()
         if self.proposal:
             self.lib.meltype_proposals_target(self.proposal, self.target.encode() if active else b"")
 
@@ -108,10 +109,18 @@ class NativeSession:
         try:
             value = json.loads(ctypes.string_at(pointer).decode("utf-8"))
         except (ValueError, UnicodeError) as error:
-            raise UnsafeEffect("invalid NativeAOT result") from error
+            raise UnsafeEffect("invalid NativeAOT result")
         finally:
             self.lib.meltype_free(pointer)
         return value
+
+    def cancel(self):
+        # Escape cancels preedit without guessing edits to child-owned text.
+        for _ in range(2):
+            result = self.key(0x1B, 0)
+            if result.get("commits"): raise UnsafeEffect("cancellation attempted a text effect")
+            if result.get("view") is None: return
+        raise UnsafeEffect("pending composition did not cancel")
 
     def key(self, vk, char, shift=0):
         return self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
@@ -178,6 +187,18 @@ class InputBridge:
         self.deferred = bytearray()
         self.on_report = None
         self.consumed_keys = set()
+        self.capturing = True
+
+    def set_capture(self, allowed):
+        if allowed == self.capturing: return
+        self.capturing = allowed
+        focus = getattr(self.native, "focus", None)
+        if focus is not None: focus(allowed)
+        if not allowed:
+            if self.view is not None: self.native.cancel()
+            self.view = None
+            self.deferred.clear()
+            self.consumed_keys.clear()
 
     def _defer(self, raw):
         if len(self.deferred)+len(raw)>1024*1024:
@@ -186,6 +207,7 @@ class InputBridge:
         return b""
 
     def _key(self, code, original, shifted=False):
+        if not self.capturing: return original
         if self.paused: return self._defer(original)
         if 65 <= code <= 90:
             vk, char, shift = code, code, 1
@@ -211,6 +233,7 @@ class InputBridge:
         return effect
 
     def _passthrough(self, raw):
+        if not self.capturing: return raw
         if self.paused: return self._defer(raw)
         if self.view is not None:
             effect = effect_bytes(self.native.commit())
@@ -221,13 +244,14 @@ class InputBridge:
     def _sequence(self, raw):
         if raw in (b"\x1b[I", b"\x1b[O"):
             focus = getattr(self.native, "focus", None)
-            if focus is not None: focus(raw == b"\x1b[I")
+            if focus is not None: focus(self.capturing and raw == b"\x1b[I")
             return raw  # A focus notification is never a text commit.
         # Cursor/device/graphics replies are not user commands. Never commit
         # composition just because a terminal answered the child's query.
         if re.fullmatch(rb"\x1b\[(?:\??[0-9;]*[Rcnt]|\?[0-9;]+u)", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")):
             if self.on_report is not None and self.on_report(raw): return b""
             return raw
+        if not self.capturing: return raw
         if self.paused: return self._defer(raw)
         # Kitty CSI-u and modifyOtherKeys use the same virtual-key boundary.
         # Original protocol bytes survive whenever Meltype did not consume a key.
@@ -374,7 +398,18 @@ def _reap(pid):
     raise UnsafeEffect("owned child did not exit after SIGKILL")
 
 
-def run(argv, make_native, make_display=None):
+def capture_allowed(master, raw_text=False):
+    """No-echo canonical input is private. Raw input needs explicit capability.
+
+    A PTY cannot distinguish a raw password field from a text editor. The
+    caller may authorize a known text application, never infer that from PID.
+    """
+    try: flags = termios.tcgetattr(master)[3]
+    except OSError: return False
+    return bool(flags & termios.ECHO) or bool(raw_text and not flags & termios.ICANON)
+
+
+def run(argv, make_native, make_display=None, raw_text=False):
     """Fork before NativeAOT, but exec only after initialization succeeds.
 
     The pipe gates only startup. No credentials, input replay, global daemon,
@@ -431,6 +466,7 @@ def run(argv, make_native, make_display=None):
             bridge.paused = bool(bridge.view is not None and (display.cursor is None or not display.boundary.safe))
 
         def accept(data):
+            bridge.set_capture(capture_allowed(master, raw_text))
             pending = deque(data)
             while pending:
                 effect = bridge.feed(bytes([pending.popleft()]))
@@ -482,6 +518,7 @@ def run(argv, make_native, make_display=None):
             # Thus a child DSR cannot be sent after ours but answered before it.
             readers = [0] if display is not None and display.pending else [0, master]
             ready, _, _ = select.select(readers, [], [], .02)
+            bridge.set_capture(capture_allowed(master, raw_text))
             # The escape deadline is independent of child-output activity.
             effect = bridge.expire()
             if effect:
@@ -529,6 +566,7 @@ def main():
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--mozc", type=Path, required=True)
     parser.add_argument("--font", type=Path, help="existing CJK font for Kitty candidate images")
+    parser.add_argument("--raw-text", action="store_true", help="authorize a known raw text application, not an unknown/password field")
     parser.add_argument("--transport-proof", action="store_true", help="explicit nonvisual test mode only")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -541,7 +579,7 @@ def main():
         return KittyDisplay(args.font, size.lines, size.columns)
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
                lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
-               make_display if args.font is not None else None)
+               make_display if args.font is not None else None, raw_text=args.raw_text)
 
 
 if __name__ == "__main__":

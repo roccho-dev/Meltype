@@ -27,7 +27,7 @@ let
         --add-flags "$out/lib/meltype/tty/meltype_tty.py" \
         --add-flags "--native $out/lib/meltype/libMeltypeNative.so" \
         --add-flags "--mozc $out/lib/meltype/mozc/meltype_mozc_helper" \
-        --add-flags "--font $font" \
+        --add-flags "--font $font --raw-text" \
         --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.icu pkgs.zlib pkgs.openssl pkgs.stdenv.cc.cc.lib ]}"
     '';
   };
