@@ -62,6 +62,13 @@ def candidates(name, before):
 def contents(name):
     return machine.succeed("cat /run/meltype-proof/" + name)
 
+def saved_editor(expected):
+    machine.send_key("ctrl-o")
+    machine.send_key("ret")
+    # Observe every edit; an ignored Backspace/Undo sequence must not pass.
+    check = 'test "$(cat /run/meltype-proof/editor-text)" = ' + shlex.quote(expected)
+    machine.wait_until_succeeds(check)
+
 # A real shell's line editor, not a substitute conversion engine or CDP sink.
 reader = put("read-line", "printf 'READLINE_READY\\n'\ntouch /run/meltype-proof/readline-ready\n"
     "IFS= read -er -p 'INPUT> ' value\nprintf %s \"$value\" > /run/meltype-proof/shell-text\n")
@@ -89,15 +96,19 @@ time.sleep(.2)
 assert ImageChops.difference(shown, scanout("B-editor-selected")).getbbox()
 machine.send_key("up")
 machine.send_key("ret")
+saved_editor("日本語")
 machine.send_key("backspace")  # nano removes one committed Japanese character.
+saved_editor('日本')
 machine.send_key("alt-u")      # nano Undo restores it.
+saved_editor('日本語')
 machine.send_key("alt-e")      # nano Redo removes it again.
+saved_editor('日本')
 machine.send_key("alt-u")      # Restore full committed text.
+saved_editor('日本語')
 machine.send_key("ret")        # A second line is an Editor capability.
 machine.send_chars("hello")
 machine.send_key("ret")        # Native English commit only.
-machine.send_key("ctrl-o")
-machine.send_key("ret")
+saved_editor("日本語\nhello")
 machine.send_key("ctrl-x")
 finished("editor")
 assert contents("editor-text") == "日本語\nhello"
