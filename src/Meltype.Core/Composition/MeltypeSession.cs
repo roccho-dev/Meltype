@@ -44,8 +44,12 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         AppendString(builder, view.Hint);
         builder.Append(",\"candidates\":");
         AppendArray(builder, view.Candidates);
-        builder.Append(",\"notes\":");
-        AppendArray(builder, view.Notes ?? []);
+        // Preserve the existing wire byte-for-byte when no notes were supplied.
+        if (view.Notes is { } notes)
+        {
+            builder.Append(",\"notes\":");
+            AppendArray(builder, notes);
+        }
         builder.Append(",\"clauses\":");
         AppendArray(builder, view.Clauses ?? []);
         // 選んでいる候補の意味 (無ければ null)。少し止まってから出すのは Swift・Python 側

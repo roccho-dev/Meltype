@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.Text.Json;
 using Meltype.Composition;
 using Meltype.Config;
 using Meltype.Input;
@@ -103,5 +104,24 @@ internal static class SessionFacadeTests
         var result = new SessionResult(true, [new TextEdit(2, "a\"b\\c\n")], new CompositionView("x", ["y"], 0, true, "h", ["x"], 0));
         const string expected = """{"consumed":true,"commits":[{"deleteBefore":2,"text":"a\"b\\c\n"}],"view":{"text":"x","converting":true,"selectedIndex":0,"selectedClause":0,"hint":"h","candidates":["y"],"clauses":["x"],"suggestion":null,"meaning":null}}""";
         Assert.Equal(expected, result.ToJson());
+    }
+
+    [Test]
+    public static void Json_NotesPreserveOrderNullsAndEscaping()
+    {
+        const string note = "根拠: \"引用\"\\path\n次行\t\u0001";
+        var view = new CompositionView("x", ["A", "B"], 1, true, "h", Notes: [null, note]);
+        using var document = JsonDocument.Parse(new SessionResult(true, [], view).ToJson());
+        var serialized = document.RootElement.GetProperty("view");
+        var notes = serialized.GetProperty("notes");
+        Assert.Equal(2, notes.GetArrayLength());
+        Assert.True(notes[0].ValueKind == JsonValueKind.Null, "null note must retain its candidate position");
+        Assert.Equal(note, notes[1].GetString());
+        Assert.Equal(1, serialized.GetProperty("selectedIndex").GetInt32());
+        Assert.Equal(0, document.RootElement.GetProperty("commits").GetArrayLength());
+        using var empty = JsonDocument.Parse(new SessionResult(true, [], view with { Notes = [] }).ToJson());
+        Assert.Equal(0, empty.RootElement.GetProperty("view").GetProperty("notes").GetArrayLength());
+        using var absent = JsonDocument.Parse(new SessionResult(true, [], view with { Notes = null }).ToJson());
+        Assert.True(!absent.RootElement.GetProperty("view").TryGetProperty("notes", out _), "absent notes preserve the legacy wire");
     }
 }
