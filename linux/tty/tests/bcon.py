@@ -12,6 +12,9 @@ start_all()
 machine.wait_for_unit("meltype-test-console.service")
 machine.succeed('test "$(cat /sys/class/tty/tty0/active)" = tty2')
 machine.wait_until_succeeds("pgrep -x login")
+# login is forked before bcon finishes evdev initialization. Process existence
+# alone is not keyboard readiness (the 7c9acd4 VM lost the initial login keys).
+machine.wait_until_succeeds("journalctl -u meltype-test-console.service --no-pager | grep -F 'All phases complete, entering main loop'")
 machine.send_chars("root\n")
 machine.wait_until_succeeds("pgrep -t pts/0 -x bash")
 machine.succeed("mkdir -p /run/meltype-proof")
