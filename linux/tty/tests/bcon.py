@@ -65,9 +65,12 @@ def contents(name):
 def saved_editor(expected):
     machine.send_key("ctrl-o")
     machine.send_key("ret")
-    # Observe every edit; an ignored Backspace/Undo sequence must not pass.
-    check = 'test "$(cat /run/meltype-proof/editor-text)" = ' + shlex.quote(expected)
-    machine.wait_until_succeeds(check)
+    # Compare bytes, including final newlines. Shell command substitution
+    # strips trailing LF and can even accept a missing file for empty expected.
+    code = ("from pathlib import Path; actual = Path('/run/meltype-proof/editor-text').read_bytes(); "
+        f"expected = bytes.fromhex({expected.encode('utf-8').hex()!r}); "
+        "assert actual == expected, (actual, expected)")
+    machine.wait_until_succeeds("python3 -c " + shlex.quote(code))
 
 # A real shell's line editor, not a substitute conversion engine or CDP sink.
 reader = put("read-line", "printf 'READLINE_READY\\n'\ntouch /run/meltype-proof/readline-ready\n"
@@ -109,9 +112,30 @@ machine.send_key("ret")        # A second line is an Editor capability.
 machine.send_chars("hello")
 machine.send_key("ret")        # Native English commit only.
 saved_editor("日本語\nhello")
+machine.send_key("ret")        # Preserve a real trailing newline, not a stripped shell result.
+saved_editor("日本語\nhello\n")
+machine.send_key("alt-u")      # Native Undo removes just that newline.
+saved_editor("日本語\nhello")
+machine.send_key("alt-e")      # Native Redo restores it.
+saved_editor("日本語\nhello\n")
 machine.send_key("ctrl-x")
 finished("editor")
-assert contents("editor-text") == "日本語\nhello"
+
+# Reopen the real Editor and cancel an uncommitted conversion. The previously
+# saved bytes must survive candidate display, cancellation and process restart.
+launch("editor-restart", "meltype-tty --raw-text -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
+machine.wait_until_succeeds("pgrep -x nano")
+before = scanout("B-editor-restart-before")
+machine.send_chars("nihongo ")
+candidates("B-editor-restart-candidates", before)
+machine.send_key("esc")
+time.sleep(.1)                 # Separate two standalone Esc keys from an Alt chord.
+machine.send_key("esc")
+time.sleep(.1)
+saved_editor("日本語\nhello\n")
+scanout("B-editor-cancelled")
+machine.send_key("ctrl-x")
+finished("editor-restart")
 
 # Typed candidate transport: original IDs/types are checked by the separately
 # required actual NativeAOT test; this local provider is explicitly a fixture.
@@ -156,8 +180,8 @@ assert contents("provider-requests") == requests_before
 scanout("B-hidden-after")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
-    "shell":"hello 日本語","editor":"日本語\\nhello","typed":"乙候補",
-    "editor_delete_undo_redo":True,"terminal_restored":True,"hidden_input_provider_requests":0,
+    "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
+    "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
     "provider":"LOCAL_FIXTURE","physical_host":"NOT_RUN","independent_review":"NOT_RUN",
     "screenshots":{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(machine.out_dir).glob('B-*.png')}},ensure_ascii=False),flush=True)
