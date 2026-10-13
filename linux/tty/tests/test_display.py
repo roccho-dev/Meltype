@@ -55,6 +55,15 @@ class DisplayTests(unittest.TestCase):
         with patch('kitty_display.time.monotonic',return_value=10): d.update(VIEW)
         with patch('kitty_display.time.monotonic',return_value=11.6), self.assertRaises(ValueError): d.update(VIEW)
 
+    def test_cancelled_view_does_not_cancel_an_outstanding_query_deadline(self):
+        d=self.display()
+        with patch('kitty_display.time.monotonic',return_value=10):
+            self.assertEqual(d.update(VIEW),b'\x1b[6n')
+            self.assertEqual(d.update(None),b'')
+        with patch('kitty_display.time.monotonic',return_value=11.6):
+            with self.assertRaisesRegex(ValueError,'cursor'):
+                d.update(None)
+
     def test_bad_cursor_and_origin_mode_rejected(self):
         d=self.display();d.update(VIEW)
         with self.assertRaises(ValueError): d.reply(b'\x1b[999;1R')

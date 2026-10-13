@@ -137,14 +137,17 @@ class KittyDisplay:
 
     def update(self,view):
         self.view=view
+        # Cancelling a view does not cancel an already-issued cursor query.
+        # Its reply still belongs here, and its wait must remain bounded.
+        if (self.started is not None and (self.pending or view is not None)
+                and time.monotonic()-self.started>1.5):
+            raise ValueError('candidate cursor was not established; no invisible confirmation')
         if view is None:
-            self.started=None
+            if not self.pending: self.started=None
             return self.clear()
         if self.boundary.origin: raise ValueError('origin-relative cursor mode needs its own proven adapter')
         if self.rows<3 or self.cols<8: raise ValueError('terminal is too small for candidate selection')
         if self.started is None and self.cursor is None: self.started=time.monotonic()
-        if self.started is not None and time.monotonic()-self.started>1.5:
-            raise ValueError('candidate cursor was not established; no invisible confirmation')
         if not self.boundary.safe or self.boundary.queries or self.pending: return b''
         if self.cursor is None:
             self.pending=True

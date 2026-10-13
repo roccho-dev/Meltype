@@ -92,6 +92,26 @@ class NativeProposalProof(unittest.TestCase):
         self.send(b'\x1b[21~')  # F10 recovers the original raw spelling, not provider text.
         self.assertEqual(self.send(b'\r'),b'u')
         self.assertIsNone(self.native.take_selection())
+    def test_unknown_target_does_not_publish_a_provider_query(self):
+        self.native.focus(False)
+        self.assertEqual(self.send(b'u'),b'')
+        pointer=self.native.lib.meltype_proposals_request(self.native.proposal)
+        if pointer: self.native._result(pointer)
+        self.assertFalse(pointer,'unknown input target must not publish raw input')
+
+    def test_target_change_discards_unsent_query_and_allows_fresh_input(self):
+        self.send(b'u')
+        self.native.focus(False)
+        pointer=self.native.lib.meltype_proposals_request(self.native.proposal)
+        if pointer: self.native._result(pointer)
+        self.assertFalse(pointer,'target invalidation must discard an unsent query')
+        self.native.focus(True)
+        self.send(b'x');q=self.query()
+        self.assertEqual(q['raw'],'ux')
+        self.response(q,[self.candidate('fresh','新しい')])
+        self.assertEqual(self.send(b'\r'),'新しい'.encode())
+        self.assertEqual(self.native.take_selection()['proposal']['id'],'fresh')
+
     def test_nontext_proposal_cannot_become_a_terminal_commit(self):
         self.send(b'u');q=self.query()
         action=self.candidate('action','shown as harmless text')

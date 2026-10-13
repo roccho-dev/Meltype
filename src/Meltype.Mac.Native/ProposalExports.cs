@@ -26,10 +26,18 @@ public static unsafe class ProposalExports
             if (target == _target) return;
             _target = target;
             _epoch++;
+            Current = Pending = null;
+            Selection = null;
+            _receive = null;
         }
 
         public void Request(ProposalQuery query, Action<ProposalResponse> receive)
         {
+            if (_target.Length == 0)
+            {
+                receive(new(query.Generation, query.Raw, [], "TARGET_UNAVAILABLE"));
+                return;
+            }
             Pending = Current = query;
             _receive = receive;
             _queryEpoch = _epoch;
