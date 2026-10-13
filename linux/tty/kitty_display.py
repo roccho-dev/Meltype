@@ -164,12 +164,20 @@ class KittyDisplay:
             return ''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))[:240]
         candidates=view.get('candidates') or []
         selected=view.get('selectedIndex',-1)
-        page=max(0,selected)//5*5
+        # Core supplies the selected meaning and each candidate's evidence.
+        # Reserve rows for those details and the keyboard hint before paging.
+        details=[]
+        if view.get('meaning'): details.append(plain(view['meaning']))
+        notes=view.get('notes') or []
+        if 0<=selected<len(notes) and notes[selected]:
+            details.append('evidence: '+plain(notes[selected]))
+        budget=min(self.rows,8)
+        details=details[:max(0,budget-3)]
+        count=min(5,max(1,budget-2-len(details)))
+        page=max(0,selected)//count*count
         lines=[plain(view.get('text',''))]
-        lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+5,len(candidates)))]
-        if view.get('meaning'): lines.append(plain(view['meaning']))
-        lines.append('↑↓ / Space   Enter: commit   Esc: cancel')
-        lines=lines[:min(self.rows,8)]
+        lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+count,len(candidates)))]
+        lines += details+['↑↓ / Space   Enter: commit   Esc: cancel']
         columns=min(self.cols,60)
         width=columns*10; line_height=26
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))

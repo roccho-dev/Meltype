@@ -44,6 +44,8 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         AppendString(builder, view.Hint);
         builder.Append(",\"candidates\":");
         AppendArray(builder, view.Candidates);
+        builder.Append(",\"notes\":");
+        AppendArray(builder, view.Notes ?? []);
         builder.Append(",\"clauses\":");
         AppendArray(builder, view.Clauses ?? []);
         // 選んでいる候補の意味 (無ければ null)。少し止まってから出すのは Swift・Python 側
@@ -57,13 +59,14 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         return builder.ToString();
     }
 
-    private static void AppendArray(StringBuilder builder, IReadOnlyList<string> items)
+    private static void AppendArray(StringBuilder builder, IReadOnlyList<string?> items)
     {
         builder.Append('[');
         for (var i = 0; i < items.Count; i++)
         {
             if (i > 0) builder.Append(',');
-            AppendString(builder, items[i]);
+            if (items[i] is { } text) AppendString(builder, text);
+            else builder.Append("null");
         }
         builder.Append(']');
     }

@@ -132,4 +132,23 @@ class DisplayTests(unittest.TestCase):
         b=m.InputBridge(None);b.paused=True
         with self.assertRaises(m.UnsafeEffect): b.feed(b'a'*(1024*1024+1))
 
+    def test_selected_evidence_changes_actual_candidate_image(self):
+        display=self.display();display.cursor=(22,5)
+        original={**VIEW,'notes':['evidence-a','evidence-b','evidence-c']}
+        changed={**original,'notes':['evidence-a','different selected evidence','evidence-c']}
+        self.assertNotEqual(display.paint(original),display.paint(changed))
+
+    def test_keyboard_hint_is_drawn_even_with_meaning_and_evidence(self):
+        display=self.display();display.cursor=(22,5)
+        view={**VIEW,'candidates':['a','b','c','d','e'],
+            'notes':['one','two','three','four','five']}
+        drawn=[]
+        class Draw:
+            def text(self,position,line,**kwargs):drawn.append(line)
+        with patch('PIL.ImageDraw.Draw',return_value=Draw()):display.paint(view)
+        self.assertLessEqual(len(drawn),8)
+        self.assertIn('two',' '.join(drawn))
+        self.assertIn('Enter',drawn[-1])
+        self.assertIn('Esc',drawn[-1])
+
 if __name__=='__main__': unittest.main()

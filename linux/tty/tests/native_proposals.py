@@ -61,6 +61,19 @@ class NativeProposalProof(unittest.TestCase):
         self.assertEqual(chosen,{'generation':q['generation'],'raw':'u','proposal':self.candidate('B')})
         self.assertIsNone(self.native.take_selection())
         self.response(q,[self.candidate('old')]);self.assertIsNone(self.bridge.view)
+    def test_evidence_is_available_before_choice_and_matches_selected_original(self):
+        self.send(b'u');q=self.query()
+        rows=[self.candidate('A'),self.candidate('B')]
+        self.response(q,rows)
+        self.assertEqual([json.loads(note) for note in self.bridge.view['notes']],
+            [row['evidence'] for row in rows])
+        self.assertEqual(json.loads(self.bridge.view['meaning']),rows[0]['meaning'])
+        self.assertEqual(self.send(b'\x1b[B'),b'')
+        self.assertEqual(json.loads(self.bridge.view['meaning']),rows[1]['meaning'])
+        self.assertEqual(json.loads(self.bridge.view['notes'][self.bridge.view['selectedIndex']]),rows[1]['evidence'])
+        self.assertEqual(self.send(b'\r'),'同じ表示'.encode())
+        self.assertEqual(self.native.take_selection()['proposal'],rows[1])
+
     def test_latest_aba_cancel_retains_raw_and_rejects_old_response(self):
         self.send(b'u');q1=self.query();self.send(b'x');q2=self.query()
         self.response(q1,[self.candidate('old')]);self.assertFalse(self.bridge.view['candidates'])
