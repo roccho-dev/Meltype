@@ -54,10 +54,12 @@ def run_case(expected, prefix, provider=None):
             "os.write(1,b'\\x1b[10;4HREADY\\x1b[10;4H');v=b''\n"
             f"while len(v)<{length}:v+=os.read(0,{length}-len(v))\n"
             "os.write(1,b'SINK:'+v.hex().encode())")
+        selection_path=Path(home)/'selection.jsonl'
+        selection_fd=os.open(selection_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_APPEND,0o600)
         args=[sys.executable,str(root/'meltype_tty.py'),'--raw-text','--native',str(pkg/'libMeltypeNative.so'),
             '--mozc',str(pkg/'mozc/meltype_mozc_helper'),'--font',font,
-            '--',sys.executable,'-c',child]
-        process=subprocess.Popen(args,stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)
+            '--selection-fd',str(selection_fd),'--',sys.executable,'-c',child]
+        process=subprocess.Popen(args,stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True,pass_fds=(selection_fd,))
         output=b''
         sent=selected=probed=False
         queries=0
@@ -90,6 +92,14 @@ def run_case(expected, prefix, provider=None):
             while select.select([master],[],[],.01)[0]: output+=os.read(master,65536)
             assert b'SINK:'+expected.encode().hex().encode() in output,output[-500:]
             assert termios.tcgetattr(slave)==original
+            selections=[json.loads(line) for line in selection_path.read_text().splitlines()]
+            if provider is not None:
+                assert len(selections)==1,selections
+                chosen=selections[0]
+                assert chosen['raw']=='u' and chosen['generation']>0,chosen
+                assert chosen['proposal']=={'id':'b','representation':expected,
+                    'meaning':{'kind':'text','id':'b'},'evidence':['local-fixture']},chosen
+            else: assert selections==[],selections
             frames=images(output)
             assert len(frames)>=3
             hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
@@ -97,11 +107,12 @@ def run_case(expected, prefix, provider=None):
             print(json.dumps({'hashes':hashes,'gate':'real-native-cli+pty+image-transport',
                 'provider':'local typed HTTP' if provider else 'native Mozc',
                 'images':len(frames),'cursor_queries':queries,'output_bytes':len(output),
+                'selections':selections,'selection_is_effect_receipt':False,
                 'child_text':expected,'exit_status':process.returncode,'terminal_restored':True,
                 'bcon':'NOT_RUN','external_models':'NOT_CALLED'}),flush=True)
         finally:
             if process.poll() is None: process.kill();process.wait()
-            os.close(master);os.close(slave)
+            os.close(selection_fd);os.close(master);os.close(slave)
 
 run_case('ニホンゴ',b'nihongo \x1b[B\r')
 seen=[]

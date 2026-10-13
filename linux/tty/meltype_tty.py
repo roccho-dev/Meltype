@@ -18,6 +18,7 @@ import os
 import pty
 import select
 import signal
+import stat
 import sys
 import termios
 import tty
@@ -421,7 +422,38 @@ def capture_allowed(master, raw_text=False):
     return bool(flags & termios.ECHO) or bool(raw_text and not flags & termios.ICANON)
 
 
-def run(argv, make_native, make_display=None, raw_text=False):
+def validate_selection_fd(fd):
+    """Explicit caller-owned append-only file; never a terminal or blocking pipe."""
+    if fd is None: return
+    if type(fd) is not int or fd < 3:
+        raise ValueError("selection fd must be separate from terminal stdio")
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    if (not stat.S_ISREG(os.fstat(fd).st_mode) or
+            flags & os.O_ACCMODE == os.O_RDONLY or not flags & os.O_APPEND):
+        raise ValueError("selection fd must be a writable append-only regular file")
+    os.set_inheritable(fd, False)
+
+
+def publish_selection(native, fd):
+    """Expose the existing one-shot selection, NOT a child/application receipt.
+
+    Called after a complete child-PTY write. On observation-write failure the
+    input may already have applied; stop without retrying that input.
+    Disabled by default: no file, ordinary keystroke log, or provider call.
+    """
+    if fd is None: return
+    selection = native.take_selection()
+    if selection is None: return
+    data = (json.dumps(selection, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    if len(data) > 1024 * 1024:
+        raise UnsafeEffect("selection observation exceeds 1 MiB; input may have applied")
+    try:
+        write_all(fd, data)
+    except OSError as error:
+        raise UnsafeEffect("selection observation failed; input may have applied; no replay") from error
+
+
+def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None):
     """Fork before NativeAOT, but exec only after initialization succeeds.
 
     The pipe gates only startup. No credentials, input replay, global daemon,
@@ -429,6 +461,7 @@ def run(argv, make_native, make_display=None, raw_text=False):
     """
     if not os.isatty(0) or not os.isatty(1):
         raise UnsafeEffect("requires an interactive TTY")
+    validate_selection_fd(selection_fd)
     original = termios.tcgetattr(0)
     reader, writer = os.pipe()
     try:
@@ -439,6 +472,7 @@ def run(argv, make_native, make_display=None, raw_text=False):
         raise
     if pid == 0:
         try:
+            if selection_fd is not None: os.close(selection_fd)
             os.close(writer)
             if os.read(reader, 1) != b"1":
                 os._exit(125)
@@ -482,7 +516,9 @@ def run(argv, make_native, make_display=None, raw_text=False):
             pending = deque(data)
             while pending:
                 effect = bridge.feed(bytes([pending.popleft()]))
-                if effect: write_all(master, effect)
+                if effect:
+                    write_all(master, effect)
+                    publish_selection(native, selection_fd)
                 refresh()
                 if not bridge.paused and bridge.deferred:
                     pending.extendleft(reversed(bridge.deferred))
@@ -578,6 +614,7 @@ def main():
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--mozc", type=Path, required=True)
     parser.add_argument("--font", type=Path, help="existing CJK font for Kitty candidate images")
+    parser.add_argument("--selection-fd", type=int, help="explicit append-only regular file descriptor for original selected proposals; not an effect receipt")
     parser.add_argument("--raw-text", action="store_true", help="authorize a known raw text application, not an unknown/password field")
     parser.add_argument("--transport-proof", action="store_true", help="explicit nonvisual test mode only")
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -591,7 +628,7 @@ def main():
         return KittyDisplay(args.font, size.lines, size.columns)
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
                lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
-               make_display if args.font is not None else None, raw_text=args.raw_text)
+               make_display if args.font is not None else None, raw_text=args.raw_text, selection_fd=args.selection_fd)
 
 
 if __name__ == "__main__":
