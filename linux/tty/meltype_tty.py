@@ -403,10 +403,13 @@ def run(argv, make_native, make_display=None):
     native = None
     old_handlers = {}
     display = None
-    status = 0
+    status = None
     def interrupted(signum, _frame):
         raise InterruptedError(f"signal {signum}")
     try:
+        # forkpty() does not guarantee FD_CLOEXEC. Native helpers do not own
+        # this PTY master and must never inherit another input connection.
+        os.set_inheritable(master, False)
         native = make_native()
         bridge = InputBridge(native)
         bind = getattr(native, "bind_target", None)
@@ -454,6 +457,27 @@ def run(argv, make_native, make_display=None):
         writer = None
         if typeahead: accept(typeahead)
         while True:
+            # Process lifetime is independent of EOF: a cursor query can pause
+            # master reads, and another process can retain a slave descriptor.
+            # Stop native/provider input work once this one child has exited.
+            found, child_status = os.waitpid(pid, os.WNOHANG)
+            if found:
+                status = child_status
+                focus = getattr(native, "focus", None)
+                if focus is not None: focus(False)
+                # Deliver already-buffered final output without requesting a
+                # new cursor or evaluating another candidate. Bound a retained
+                # slave's output rather than waiting for it to close forever.
+                for _ in range(16):
+                    if not select.select([master], [], [], 0)[0]: break
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError as error:
+                        if error.errno != errno.EIO: raise
+                        break
+                    if not data: break
+                    write_all(1, display.output(data) if display is not None else data)
+                break
             # While our cursor query is pending, do not forward child output.
             # Thus a child DSR cannot be sent after ours but answered before it.
             readers = [0] if display is not None and display.pending else [0, master]
@@ -496,7 +520,7 @@ def run(argv, make_native, make_display=None):
                     if native is not None:
                         native.close()
                 finally:
-                    status = _reap(pid)
+                    if status is None: status = _reap(pid)
     return os.waitstatus_to_exitcode(status)
 
 
