@@ -187,9 +187,22 @@ class InputBridge:
         self.deferred = bytearray()
         self.on_report = None
         self.consumed_keys = set()
+        self.capture_permitted = True
+        self.focused = True
         self.capturing = True
 
     def set_capture(self, allowed):
+        # The child app's ECHO capability and the terminal focus are
+        # independent. ECHO returning must not reactivate an unfocused target.
+        self.capture_permitted = bool(allowed)
+        self._refresh_capture()
+
+    def set_focus(self, focused):
+        self.focused = bool(focused)
+        self._refresh_capture()
+
+    def _refresh_capture(self):
+        allowed = self.capture_permitted and self.focused
         if allowed == self.capturing: return
         self.capturing = allowed
         focus = getattr(self.native, "focus", None)
@@ -243,9 +256,8 @@ class InputBridge:
 
     def _sequence(self, raw):
         if raw in (b"\x1b[I", b"\x1b[O"):
-            focus = getattr(self.native, "focus", None)
-            if focus is not None: focus(self.capturing and raw == b"\x1b[I")
-            return raw  # A focus notification is never a text commit.
+            self.set_focus(raw == b"\x1b[I")
+            return raw  # Focus changes never commit or replay prior preedit.
         # Cursor/device/graphics replies are not user commands. Never commit
         # composition just because a terminal answered the child's query.
         if re.fullmatch(rb"\x1b\[(?:\??[0-9;]*[Rcnt]|\?[0-9;]+u)", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")):
