@@ -109,7 +109,7 @@ class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         query=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         seen.append(query)
-        proposals=[{'id':id,'representation':text,'meaning':{'id':id},'evidence':['local-fixture']}
+        proposals=[{'id':id,'representation':text,'meaning':{'kind':'text','id':id},'evidence':['local-fixture']}
             for id,text in [('a','第一候補'),('b','第二候補')]]
         body=json.dumps({**query,'proposals':proposals}).encode()
         self.send_response(200);self.end_headers();self.wfile.write(body)
