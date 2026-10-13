@@ -9,28 +9,7 @@ let
   bcon = pkgs.callPackage (resources + "/nixos/bcon.nix") { };
   cjk = pkgs.noto-fonts-cjk-sans.override { static = true; };
   python = pkgs.python3.withPackages (p: [ p.pillow ]);
-  product = pkgs.stdenvNoCC.mkDerivation {
-    pname = "meltype-tty-trial";
-    version = "0";
-    src = builtins.path { path = builtins.toPath packagePath; name = "same-build-meltype"; };
-    nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
-    buildInputs = [ pkgs.stdenv.cc.cc.lib pkgs.icu pkgs.zlib pkgs.openssl ];
-    runtimeDependencies = [ pkgs.icu ];
-    dontBuild = true;
-    installPhase = ''
-      mkdir -p "$out/lib/meltype" "$out/bin"
-      cp -r . "$out/lib/meltype/"
-      chmod +x "$out/lib/meltype/mozc/meltype_mozc_helper"
-      font=${cjk}/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc
-      test -r "$font" || exit 1
-      makeWrapper ${python}/bin/python3 "$out/bin/meltype-tty" \
-        --add-flags "$out/lib/meltype/tty/meltype_tty.py" \
-        --add-flags "--native $out/lib/meltype/libMeltypeNative.so" \
-        --add-flags "--mozc $out/lib/meltype/mozc/meltype_mozc_helper" \
-        --add-flags "--font $font --raw-text" \
-        --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath [ pkgs.icu pkgs.zlib pkgs.openssl pkgs.stdenv.cc.cc.lib ]}"
-    '';
-  };
+  product = import ../package.nix { inherit pkgs packagePath; };
   ready = pkgs.writeShellScript "meltype-test-drm-ready" ''
     for i in $(seq 1 100); do
       for card in /dev/dri/card*; do test ! -c "$card" || exit 0; done

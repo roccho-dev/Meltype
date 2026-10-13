@@ -5,6 +5,23 @@ It has no Chrome/cdp-tty test dependency. Conversion remains the existing
 Meltype Core/NativeAOT/Mozc implementation. There is no SKK, Fcitx5, second
 ranker, daemon, or shadow terminal grid. Kitty images display candidates.
 
+## Reusable B package export
+
+`linux/tty/package.nix` is the sole B-owned Nix wrapper of an immutable,
+same-build `Meltype-linux` artifact. It accepts `{ pkgs, packagePath }` and
+returns a derivation providing `bin/meltype-tty`, existing NativeAOT/Mozc
+and font references. It reuses the exact recipe previously embedded in B's
+VM test. It does **not** build an independent conversion engine or own bcon.
+
+Raw no-echo interception is not enabled by the package. The isolated B
+Shell/nano test now requests `--raw-text` explicitly per known text app.
+An unknown or password input still defaults to bypassing capture.
+
+C/resources #14 can consume this owner-authored package expression from a
+pinned B source revision together with a separately verified immutable
+artifact/source hash. This export is not a substitute for its source/version
+admission and does not imply that C's integration tests have passed.
+
 ## Source and ownership
 
 Reuse: old PR #2 at `d673872560f7e6b3b20fed1452f6949c55c722f1`.

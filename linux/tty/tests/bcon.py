@@ -72,7 +72,7 @@ def saved_editor(expected):
 # A real shell's line editor, not a substitute conversion engine or CDP sink.
 reader = put("read-line", "printf 'READLINE_READY\\n'\ntouch /run/meltype-proof/readline-ready\n"
     "IFS= read -er -p 'INPUT> ' value\nprintf %s \"$value\" > /run/meltype-proof/shell-text\n")
-launch("shell", "meltype-tty -- bash --noprofile --norc " + reader)
+launch("shell", "meltype-tty --raw-text -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/readline-ready")
 before = scanout("B-shell-before")
 machine.send_chars("hello nihongo ")
@@ -86,7 +86,7 @@ assert contents("shell-text") == "hello 日本語"
 
 # Real nano owns edits to already committed text and its native Undo/Redo.
 # Meltype owns preedit/reconversion only; no guessed deleteBefore/backspaces.
-launch("editor", "meltype-tty -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
+launch("editor", "meltype-tty --raw-text -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
 machine.wait_until_succeeds("pgrep -x nano")
 before = scanout("B-editor-before")
 machine.send_chars("nihongo ")
@@ -130,7 +130,7 @@ HTTPServer(('127.0.0.1',8031),Handler).serve_forever()
 machine.succeed("systemd-run --unit=meltype-test-provider -- python3 " + provider)
 machine.wait_until_succeeds("ss -ltn | grep ':8031'")
 reader = put("read-typed", "touch /run/meltype-proof/typed-ready\nIFS= read -er -p 'TYPED> ' value\nprintf %s \"$value\" > /run/meltype-proof/typed-text\n")
-launch("typed", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- bash --noprofile --norc " + reader)
+launch("typed", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/typed-ready")
 before = scanout("B-typed-before")
 machine.send_chars("u")
@@ -146,7 +146,7 @@ assert contents("typed-text") == "乙候補"
 requests_before = contents("provider-requests")
 reader = put("read-hidden", "stty -echo\n touch /run/meltype-proof/hidden-ready\n"
     "IFS= read -r value\nprintf %s \"$value\" > /run/meltype-proof/hidden-text\n")
-launch("hidden", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty -- bash --noprofile --norc " + reader)
+launch("hidden", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/hidden-ready")
 hidden_before = scanout("B-hidden-before")
 machine.send_chars("not-a-real-password\n")
