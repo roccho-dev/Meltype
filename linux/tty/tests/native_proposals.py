@@ -135,6 +135,84 @@ class NativeProposalProof(unittest.TestCase):
         self.send(b'\x1b[21~')
         self.assertEqual(self.send(b'\r'),b'u')
         self.assertIsNone(self.native.take_selection())
+    def queued_query_ends(self, ending):
+        # The first query has really reached localhost. Hold only that response
+        # so a newer raw input is pending, not yet acquired by the HTTP worker.
+        entered=threading.Event();release=threading.Event();seen=[]
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(inner):
+                q=json.loads(inner.rfile.read(int(inner.headers['Content-Length'])))
+                seen.append(q)
+                if len(seen)==1:
+                    entered.set();release.wait(1.5)
+                data=json.dumps({**q,'proposals':[self.candidate('live-local','確認候補')]}).encode()
+                inner.send_response(200);inner.send_header('Content-Length',str(len(data)))
+                inner.end_headers()
+                try: inner.wfile.write(data)
+                except (BrokenPipeError,ConnectionResetError): pass
+            def log_message(self,*_): pass
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
+        self.native.close()
+        try:
+            self.native=NativeSession(PACKAGE/'libMeltypeNative.so',PACKAGE/'mozc/meltype_mozc_helper',
+                f'http://127.0.0.1:{server.server_port}/proposal')
+            self.native.bind_target('fixed-child-cancel');self.bridge=InputBridge(self.native)
+            self.assertEqual(self.send(b'u'),b'');self.native.poll_proposals()
+            self.assertTrue(entered.wait(1),'first query never reached the provider')
+            self.assertEqual(self.send(b'x'),b'');self.native.poll_proposals()
+            with self.native.transport.condition:
+                pending=dict(self.native.transport.pending)
+            self.assertEqual(pending['raw'],'ux')
+            if ending=='escape':
+                self.assertEqual(self.send(b'\x1b'),b'')
+                self.assertEqual(self.bridge.flush_escape(),b'')
+                self.assertIsNone(self.bridge.view)  # No returned candidate was displayed.
+            elif ending=='enter':
+                self.assertEqual(self.send(b'\r'),b'ux')
+                self.assertIsNone(self.bridge.view)
+            else:
+                # InputBridge uses CommitPending before forwarding a command.
+                self.assertEqual(self.send(b'\x01'),b'ux\x01')
+                self.assertIsNone(self.bridge.view)
+            self.assertIsNone(self.native.take_selection())
+            with self.native.transport.condition:
+                self.assertIsNone(self.native.transport.pending,'ended query was still queued for transmission')
+                self.assertIsNone(self.native.transport.latest)
+                self.assertIsNone(self.native.transport.response)
+            release.set()
+            deadline=time.monotonic()+.2
+            while time.monotonic()<deadline:
+                self.assertIsNone(self.native.poll_proposals(),'cancelled response reached native')
+                time.sleep(.005)
+            self.assertEqual(seen,[{'generation':pending['generation']-1,'raw':'u'}])
+            self.assertFalse(select.select([self.slave],[],[],0)[0],'unselected text reached the child')
+            # Cancellation does not close the reusable transport or reject a
+            # genuinely new query. Its returned original ID remains selectable.
+            self.assertEqual(self.send(b'z'),b'');self.native.poll_proposals()
+            deadline=time.monotonic()+2
+            while time.monotonic()<deadline:
+                result=self.native.poll_proposals()
+                if result is not None:
+                    self.assertEqual(effect_bytes(result),b'');self.bridge.view=result['view'];break
+                time.sleep(.005)
+            self.assertEqual([q['raw'] for q in seen],['u','z'])
+            self.assertEqual(self.bridge.view['candidates'],['確認候補'])
+            self.assertEqual(self.send(b'\r'),'確認候補'.encode())
+            self.assertEqual(self.native.take_selection()['proposal']['id'],'live-local')
+            self.assertIsNone(self.native.take_selection())
+        finally:
+            release.set();server.shutdown();server.server_close();worker.join(1)
+
+    def test_escape_discards_unsent_query_without_effect_and_next_input_works(self):
+        self.queued_query_ends('escape')
+
+    def test_enter_discards_unsent_query_without_a_second_commit(self):
+        self.queued_query_ends('enter')
+
+    def test_passthrough_commit_discards_unsent_query(self):
+        self.queued_query_ends('passthrough')
+
     def test_real_http_response_reaches_core_without_blocking_key_thread(self):
         seen=[]
         class Handler(BaseHTTPRequestHandler):

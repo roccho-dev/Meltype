@@ -110,7 +110,7 @@ class NativeSession:
         try:
             value = json.loads(ctypes.string_at(pointer).decode("utf-8"))
         except (ValueError, UnicodeError) as error:
-            raise UnsafeEffect("invalid NativeAOT result")
+            raise UnsafeEffect("invalid NativeAOT result") from error
         finally:
             self.lib.meltype_free(pointer)
         return value
@@ -124,9 +124,15 @@ class NativeSession:
         raise UnsafeEffect("pending composition did not cancel")
 
     def key(self, vk, char, shift=0):
-        return self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
+        # Native cancels the candidate generation; cancel its queued acquisition
+        # too. A request already sent cannot be recalled, only made inert.
+        if vk == 0x1B and self.transport is not None: self.transport.cancel()
+        result = self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
+        if result.get("view") is None and self.transport is not None: self.transport.cancel()
+        return result
 
     def commit(self):
+        if self.transport is not None: self.transport.cancel()
         return self._result(self.lib.meltype_commit(self.session))
 
     def close(self):
