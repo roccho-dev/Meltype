@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yukishiro
 #
-# Meltype の Linux 版 (IBus) を組み立てる。できたものは linux/build/Meltype-linux/ に置く。
-#   linux/build.sh
-# 先に Mozc の変換ヘルパーを native/mozc/build-mozc-helper.sh でビルドしておく (native/mozc/bin/linux/)。
-# 必要なもの: .NET 10 SDK、clang (NativeAOT のリンクに使う)、zlib (zlib1g-dev)
+# Meltype の Linux 版 (IBus) と Direct TTY 試験入口を同じ配布物に組み立てる。
+# 先に Mozc の変換ヘルパーを native/mozc/build-mozc-helper.sh でビルドしておく。
+# 必要なもの: .NET 10 SDK、clang、zlib。TTYの実行・試験はPython 3。
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(dirname "$here")"
@@ -26,7 +25,7 @@ rm -rf "$here/build"
 mkdir -p "$out/mozc"
 
 echo "== 1/2 本体 (C#, NativeAOT) をビルド"
-# リポジトリの nuget.config は NuGet を使わない設定 (Windows の開発環境用) なので、NativeAOT のコンパイラを取るために nuget.org を指定する。
+# NuGet を使わないWindows設定とは分け、既存のNativeAOT取得元を明示する。
 dotnet publish "$root/src/Meltype.Mac.Native/Meltype.Mac.Native.csproj" -c Release -r "$rid" \
     -p:PublishAot=true -p:NativeLib=Shared -p:StripSymbols=true \
     --source https://api.nuget.org/v3/index.json -o "$here/build/native"
@@ -38,4 +37,8 @@ cp "$here/TESTER-README.txt" "$out/はじめにお読みください.txt"
 cp "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$out/"
 cp "$mozc/meltype_mozc_helper" "$mozc/MOZC-LICENSE.txt" "$mozc/MOZC-CREDITS.html" "$out/mozc/"
 chmod +x "$out/ibus-engine-meltype" "$out/install.sh" "$out/uninstall.sh" "$out/mozc/meltype_mozc_helper"
+# Explicit source members only: never ship interpreter caches or user data.
+mkdir -p "$out/tty/tests"
+cp "$here/tty/"*.py "$here/tty/README.md" "$out/tty/"
+cp "$here/tty/tests/"*.py "$out/tty/tests/"
 echo "作成しました: $out"
