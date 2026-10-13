@@ -37,6 +37,42 @@ class CaptureScopeTests(unittest.TestCase):
         self.assertEqual(n.calls,[('focus',False),('cancel',)])
         b.set_capture(True);self.assertEqual(n.calls[-1],('focus',True))
 
+    def test_focus_loss_cancels_old_preedit_and_echo_cannot_reenable_it(self):
+        class Native:
+            def __init__(self): self.calls = []
+            def focus(self, value): self.calls.append(("focus", value))
+            def cancel(self): self.calls.append(("cancel",))
+            def key(self, *args):
+                self.calls.append(("key", args))
+                return {"consumed": False, "commits": [], "view": None}
+        n = Native()
+        bridge = m.InputBridge(n)
+        bridge.view = {"text": "old preedit"}
+        self.assertEqual(bridge.feed(b"\x1b[O"), b"\x1b[O")
+        self.assertFalse(bridge.capturing)
+        self.assertIsNone(bridge.view)
+        bridge.set_capture(True)  # ECHO permission alone cannot override focus loss.
+        self.assertFalse(bridge.capturing)
+        self.assertEqual(bridge.feed(b"secret"), b"secret")
+        self.assertEqual(n.calls, [("focus", False), ("cancel",)])
+        self.assertEqual(bridge.feed(b"\x1b[I"), b"\x1b[I")
+        self.assertTrue(bridge.capturing)
+        self.assertEqual(n.calls[-1], ("focus", True))
+        self.assertEqual(bridge.feed(b"a"), b"a")
+        self.assertEqual(n.calls[-1][0], "key")
+
+    def test_focus_regain_never_bypasses_canonical_no_echo(self):
+        class Native:
+            def __init__(self): self.calls = []
+            def focus(self, value): self.calls.append(("focus", value))
+            def key(self, *_): raise AssertionError("private key must not reach NativeAOT")
+        n = Native()
+        bridge = m.InputBridge(n)
+        bridge.set_capture(False)
+        self.assertEqual(bridge.feed(b"\x1b[O\x1b[Iprivate"), b"\x1b[O\x1b[Iprivate")
+        self.assertFalse(bridge.capturing)
+        self.assertEqual(n.calls, [("focus", False)])
+
     def test_actual_hidden_shell_input_bypasses_native_even_with_raw_text_enabled(self):
         with tempfile.TemporaryDirectory() as td:
             path=Path(td);secret='not-a-real-password';marker=path/'value'
