@@ -154,7 +154,8 @@ class KittyDisplay:
             return b'\x1b[6n'
         signature=(repr(view),self.cursor,self.rows,self.cols)
         if signature==self.last: return b''
-        result=self.clear()+self.paint(view)
+        painted=self.paint(view)
+        result=self.clear()+painted
         self.visible=True;self.last=signature
         return result
 
@@ -177,22 +178,26 @@ class KittyDisplay:
         page=max(0,selected)//count*count
         lines=[plain(view.get('text',''))]
         lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+count,len(candidates)))]
-        lines += details+['↑↓ / Space   Enter: commit   Esc: cancel']
+        lines += details+['Proposal preview; comment is preserved' if view.get('detail') else '↑↓ / Space   Enter: commit   Esc: cancel']
         columns=min(self.cols,60)
         width=columns*10; line_height=26
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
         draw=ImageDraw.Draw(image)
         for i,line in enumerate(lines):
             draw.text((4,i*line_height+2),line,font=self.font,fill=(240,242,246))
+        if view.get('detail'):
+            from proposal_detail import compose_detail
+            image=compose_detail(image,view,self.font,self.rows,plain)
+        display_rows=image.height//line_height
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
         row,col=self.cursor
-        top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
+        top=row-display_rows if row>display_rows else min(row+1,self.rows-display_rows+1)
         left=max(1,min(col,self.cols-columns+1))
         out=bytearray(f'\x1b[{top};{left}H'.encode())
         for offset in range(0,len(payload),4096):
             more=int(offset+4096<len(payload))
-            control=f'a=T,f=100,t=d,i={self.image_id},C=1,z=2147483647,c={columns},r={len(lines)},q=2,m={more}' if offset==0 else f'm={more}'
+            control=f'a=T,f=100,t=d,i={self.image_id},C=1,z=2147483647,c={columns},r={display_rows},q=2,m={more}' if offset==0 else f'm={more}'
             out.extend(b'\x1b_G'+control.encode()+b';'+payload[offset:offset+4096]+b'\x1b\\')
         out.extend(f'\x1b[{row};{col}H'.encode())
         return bytes(out)

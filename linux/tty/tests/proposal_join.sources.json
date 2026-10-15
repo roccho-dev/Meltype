@@ -1,0 +1,19 @@
+{
+  "ops": {
+    "packages/semcmp/semcmp.mjs": "5bf1696e2c9dd0d0d00f912b35e226cdb02c1909",
+    "packages/semcmp/context.mjs": "82eae5d7e24076401f4bf4847ee09967d05f445c",
+    "packages/jev-review/core.mjs": "2331f7983430aa5aff9d36612e3dcccd68d4c0e8",
+    "packages/jev-review/review.mjs": "9997e27fead0a5e68eb65765e92d2e75899950ec",
+    "packages/jev-review/rank.mjs": "24f06f52a5e3e451dfa438a8c4544700fe934847",
+    "packages/jev-review/jev.mjs": "e39ea5a76164ee5f58c7054b6340577c36d17d7e",
+    "packages/jev/src/core.mjs": "038e8c26e7bbfe59cce0f5ad5220b2593e5cc17a"
+  },
+  "ui": {
+    "capabilities/proposal-detail/src/index.mjs": "4495b923e58504721788cba64e9521ca4e6e0c0f"
+  },
+  "Meltype": {
+    "linux/tty/editor_context.vim": "af292533bac527cb124f3d1c53c1b1ebf7ee28a6",
+    "linux/tty/kitty_display.py": "8076764ecf70e8c4113eff28effab3ddf027a76b",
+    "linux/tty/proposal_detail.py": "5923028fad05d51ec0266aa9a421e923e862aa70"
+  }
+}
