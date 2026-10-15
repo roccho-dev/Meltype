@@ -96,7 +96,7 @@ class DetailTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('kitty_baseline', path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         for candidates in [['漢字', '感じ'], ['abc'], []]:
-            view = {'text': 'にほんご', 'candidates': candidates, 'selectedIndex': 0, 'meaning': '意味', 'notes': ['根拠て']}
+            view = {'text': 'にほんご', 'candidates': candidates, 'selectedIndex': 0, 'meaning': '意味', 'notes': ['根拠']}
             old = module.KittyDisplay(FONT, 24, 80, image_id=77); old.cursor = (3, 4)
             self.assertEqual(old.update(copy.deepcopy(view)), self.display().update(view))
 
