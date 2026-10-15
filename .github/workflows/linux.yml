@@ -12,6 +12,7 @@ on:
       - 'linux/**'
       - 'native/mozc/**'
       - 'src/Meltype.Core/**'
+      - 'src/Meltype.Mac.Native/**'
       - 'dictionaries/**'
       - 'tools/test-native-boundaries.py'
       - '.github/workflows/linux.yml'
@@ -28,8 +29,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     # タグ時の softprops/action-gh-release 用。permissions は式が使えないため常に write。
+    # id-token / attestations は Linux zip の出自の証明 (actions/attest-build-provenance) 用。
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # IBus のエンジン (Python) の書き間違いを、時間のかかるビルドの前に見つける
@@ -42,10 +48,12 @@ jobs:
       - name: Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld pkg-config zlib1g-dev python3 python3-gi gir1.2-ibus-1.0 \
+          sudo apt-get install -y clang lld pkg-config zlib1g-dev python3 python3-gi gir1.2-ibus-1.0 python3-pil fonts-noto-cjk \
             ibus dbus-x11 xvfb xauth \
             libdbus-1-dev libglib2.0-dev libgtk-3-dev libibus-1.0-dev libxcb-xfixes0-dev qt6-base-dev \
             cmake fcitx5 fcitx5-modules-dev libfcitx5core-dev libfcitx5utils-dev libfcitx5config-dev
+      - name: Direct TTY transport, graphics and key regressions
+        run: python3 -m unittest discover -s linux/tty/tests -v
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
@@ -79,6 +87,12 @@ jobs:
         run: timeout 120 python3 linux/tests/test_integration.py linux/build/Meltype-linux
       - name: Private IBus daemon tests
         run: timeout 120 xvfb-run -a dbus-run-session -- python3 linux/tests/test_daemon.py linux/build/Meltype-linux
+      - name: Same-package real NativeAOT, Mozc, PTY and candidate image transport
+        run: |
+          python3 -m unittest discover -s linux/build/Meltype-linux/tty/tests -v
+          python3 linux/build/Meltype-linux/tty/tests/native_tty.py "$PWD/linux/build/Meltype-linux"
+          python3 linux/build/Meltype-linux/tty/tests/native_display.py "$PWD/linux/build/Meltype-linux"
+          python3 linux/build/Meltype-linux/tty/tests/native_proposals.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
           # タグ (v1.0.0) なら Meltype-1.0.0-linux.zip、それ以外はテスト版の名前
@@ -90,6 +104,32 @@ jobs:
           name: meltype-linux
           path: linux/build/Meltype-*.zip
           retention-days: 14
+      - name: Require real KVM for bcon test
+        run: test -c /dev/kvm
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
+        with:
+          extra_nix_config: |
+            system-features = nixos-test kvm big-parallel
+      - name: Actual bcon NixOS VT, candidate scanout, child input and terminal recovery
+        run: |
+          set -o pipefail
+          nix-instantiate --parse linux/tty/tests/bcon.nix > /dev/null
+          nix-build linux/tty/tests/bcon.nix --argstr packagePath "$PWD/linux/build/Meltype-linux" \
+            -o "$RUNNER_TEMP/meltype-bcon" --show-trace 2>&1 | tee "$RUNNER_TEMP/meltype-bcon.log"
+      - name: Keep bcon scanout evidence distinct from controlled transport
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: meltype-bcon-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/meltype-bcon.log
+            ${{ runner.temp }}/meltype-bcon/*.png
+          if-no-files-found: warn
+          retention-days: 14
+      # この fork の GitHub Actions でビルドしたことの証明 (gh attestation verify <zip> --repo roccho-dev/Meltype で確かめられる)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: linux/build/Meltype-*.zip
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
         with:

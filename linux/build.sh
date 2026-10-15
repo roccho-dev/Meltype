@@ -49,4 +49,9 @@ cp "$here/TESTER-README.txt" "$out/はじめにお読みください.txt"
 cp "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$out/"
 cp "$mozc/meltype_mozc_helper" "$mozc/MOZC-LICENSE.txt" "$mozc/MOZC-CREDITS.html" "$out/mozc/"
 chmod +x "$out/ibus-engine-meltype" "$out/install.sh" "$out/uninstall.sh" "$out/mozc/meltype_mozc_helper"
+# B uses the same NativeAOT/Mozc build, not a second conversion engine.
+# Copy explicit source members only; no caches, user state, or font files.
+mkdir -p "$out/tty/tests"
+cp "$here/tty/"*.py "$here/tty/README.md" "$out/tty/"
+cp "$here/tty/tests/"*.py "$out/tty/tests/"
 echo "作成しました: $out"
