@@ -1,0 +1,70 @@
+name: proposal-poc
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'linux/tty/**'
+      - '.github/workflows/proposal-poc.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proposal-poc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: roccho-org/ops
+          ref: 09d8600146c1055b5c1496e5d70167bc33379ade
+          path: poc-ops
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: roccho-dev/ui
+          ref: 1388168fe093e24aac8133d5f11b0a737cefd301
+          path: poc-ui
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Test dependencies, no model credentials
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y vim python3-pil fonts-noto-cjk
+      - name: Fixed-source component and integration proofs
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/proposal-poc"
+          mkdir -p "$out"
+          export MELTYPE_TEST_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+          git show ab29d027d6e89a82ed00a9d169cf34ebd0548594:linux/tty/kitty_display.py > "$RUNNER_TEMP/kitty-baseline.py"
+          export MELTYPE_KITTY_BASELINE="$RUNNER_TEMP/kitty-baseline.py"
+          timeout 20 vim -Nu NONE -i NONE -n -es -S linux/tty/tests/editor_context.vim 2>&1 | tee "$out/editor.log"
+          node --test poc-ops/packages/semcmp/context.test.mjs 2>&1 | tee "$out/ops.log"
+          node --test poc-ui/capabilities/proposal-detail/tests/run.mjs 2>&1 | tee "$out/ui.log"
+          /usr/bin/python3 linux/tty/tests/test_proposal_detail.py 2>&1 | tee "$out/display.log"
+          /usr/bin/python3 linux/tty/tests/proposal_join.py --ops-root "$PWD/poc-ops" --ui-root "$PWD/poc-ui" --font "$MELTYPE_TEST_FONT" --out "$out/join" 2>&1 | tee "$out/join.log"
+          node --version > "$out/environment.log"
+          /usr/bin/python3 --version >> "$out/environment.log"
+          vim --version >> "$out/environment.log"
+      - name: Preserve exact source pins, readback and actual PNG output
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: proposal-poc-${{ github.sha }}
+          path: ${{ runner.temp }}/proposal-poc
+          if-no-files-found: warn
+          retention-days: 14
