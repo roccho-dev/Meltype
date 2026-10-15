@@ -125,6 +125,27 @@ class NativeProposalProof(unittest.TestCase):
         self.assertEqual(self.send(b'\r'),'新しい'.encode())
         self.assertEqual(self.native.take_selection()['proposal']['id'],'fresh')
 
+    def test_mixed_text_and_action_refuses_the_whole_response_in_both_orders(self):
+        text=self.candidate('text','must not be filtered through')
+        action=self.candidate('action','not a terminal action')
+        action['meaning']={'kind':'action','name':'some-action'}
+        for rows in ([text,action],[action,text]):
+            self.assertEqual(self.send(b'u'),b'')
+            q=self.query()
+            self.response(q,rows)
+            self.assertFalse(self.bridge.view['candidates'],'mixed response must not be filtered or reordered')
+            self.assertIsNone(self.native.take_selection())
+            # Cancel the user's raw preedit, not a provider text or action.
+            for _ in range(2):
+                if self.bridge.view is None: break
+                self.assertEqual(self.send(b'\x1b'),b'')
+                self.assertEqual(self.bridge.flush_escape(),b'')
+            self.assertIsNone(self.bridge.view)
+        self.send(b'u');q=self.query()
+        self.response(q,[self.candidate('fresh','新しい')])
+        self.assertEqual(self.send(b'\r'),'新しい'.encode())
+        self.assertEqual(self.native.take_selection()['proposal']['id'],'fresh')
+
     def test_nontext_proposal_cannot_become_a_terminal_commit(self):
         self.send(b'u');q=self.query()
         action=self.candidate('action','shown as harmless text')
