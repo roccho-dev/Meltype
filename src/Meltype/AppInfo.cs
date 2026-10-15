@@ -25,8 +25,11 @@ internal static class AppInfo
     /// <summary>不具合報告を開く URL (OS・版・実行環境は今のものを入れる)。</summary>
     public static string ReportUrl(string environment) => Config.ProjectInfo.ReportUrl(Diagnostics.ReportInfo.OsName, Version, environment);
 
-    /// <summary>自動更新で最新のリリースを見に行く GitHub のリポジトリ (公開されている必要がある)。</summary>
-    public const string UpdateRepository = "yksr-melt/Meltype";
+    /// <summary>
+    /// 自動更新で最新のリリースを見に行く GitHub のリポジトリ (公開されている必要がある)。この fork のリリースだけを使う
+    /// (build.yml の CI がビルドしたリポジトリ GITHUB_REPOSITORY と同じであることをテストで確かめる)。
+    /// </summary>
+    public const string UpdateRepository = "roccho-dev/Meltype";
     public const string Contact = "ibutya0319@gmail.com";
 
     public static string Version =>

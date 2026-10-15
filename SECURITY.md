@@ -44,8 +44,8 @@ Meltype はキーボードの入力を扱うソフトです。安心して使っ
 悪用できそうな問題 (打った文字が漏れる・ほかのアプリに勝手に入力される・権限が上がる など) を見つけたら、
 **公開の Issue ではなく、非公開で報告してください。**
 
-- GitHub: [Security → Report a vulnerability](https://github.com/yksr-melt/Meltype/security/advisories/new) (非公開で作者にだけ届きます)
-- メール: ibutya0319@gmail.com (件名に「Meltype セキュリティ」と入れてください)
+- GitHub: [Security → Report a vulnerability](https://github.com/roccho-dev/Meltype/security/advisories/new) (非公開でこの fork の管理者にだけ届きます)
+- 元のプロジェクト (https://github.com/yksr-melt/Meltype) のコードにもある問題は、元のプロジェクトの報告先にも知らせてください。
 
 次のことを書いてもらえると助かります: 起きること、再現の手順、Meltype の版と OS、考えられる影響。
 受け取ったら 1 週間以内に返事をし、直すまでの見通しをお知らせします。直した版を出すまでは、内容を公開しないでください。
@@ -65,6 +65,6 @@ Meltype はキーボードの入力を扱うソフトです。安心して使っ
 <img src="docs/images/headings/security/04.svg" alt="配布物の確かめ方" height="53"><br>
 
 
-- 配布しているのは GitHub のリリース (公開後) と、作者が直接渡すテスト版だけです。ほかの場所の Meltype は使わないでください。
-- 自動更新は、GitHub が公開している SHA-256 と一致するかを確かめてからインストールします。
-- 公開版の実行ファイルには、作者のコード署名を付ける予定です。
+- この fork が配布しているのは、GitHub のリリース (https://github.com/roccho-dev/Meltype/releases) の zip だけです。ほかの場所の Meltype は使わないでください。
+- 自動更新は、この fork のリリースだけを見ます。GitHub が公開している SHA-256 と一致するかを確かめてからインストールし、SHA-256 の無い zip は使いません。
+- 実行ファイルにコード署名は付けていません。zip がこの fork の GitHub Actions でビルドされたことは、`gh attestation verify <zip> --repo roccho-dev/Meltype` で確かめられます。

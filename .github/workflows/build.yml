@@ -146,6 +146,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
@@ -175,6 +177,15 @@ jobs:
         run: |
           $version = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.Substring(1) } else { '' }
           .\Build-Package.ps1 -Version $version
+      # タグの版と、ビルドした Meltype.exe の版 (ProductVersion の + より前) が同じか。違うまま出すと、
+      # 自動更新が「新しい版がある」と同じ版を取り直し続けるので、出さない。
+      - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        run: |
+          $expected = $env:GITHUB_REF_NAME.Substring(1)
+          $actual = ((Get-Item -LiteralPath 'dist\Meltype\app\Meltype.exe').VersionInfo.ProductVersion -split '\+')[0]
+          if ($actual -ne $expected) { throw "タグの版 ($expected) と Meltype.exe の版 ($actual) が違います。src\Meltype\Meltype.csproj の <Version> を合わせてください。" }
       # 検出・検査不能の配布物は、Artifacts にもリリースにも公開しない。
       - name: Scan Windows package with Defender
         shell: powershell
@@ -183,6 +194,10 @@ jobs:
           $packages = @(Get-ChildItem -LiteralPath dist -Filter 'Meltype-*.zip' -File)
           if ($packages.Count -ne 1) { throw 'Expected one Meltype-*.zip file but found ' + $packages.Count }
           .\tools\Scan-WindowsPackage.ps1 -Path @('.\dist\Meltype', $packages[0].FullName)
+      # この fork の GitHub Actions でビルドしたことの証明 (gh attestation verify <zip> --repo roccho-dev/Meltype で確かめられる)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/Meltype-*
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: meltype-package

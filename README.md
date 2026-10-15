@@ -6,8 +6,8 @@
 <p align="center"><b>雪解けのように、半角/全角の壁を溶かす日本語入力。</b></p>
 
 <p align="center">
-  <a href="https://github.com/yksr-melt/Meltype/releases/latest"><img src="https://img.shields.io/github/v/release/yksr-melt/Meltype?color=5ec4f0" alt="release"></a>
-  <a href="https://github.com/yksr-melt/Meltype/releases"><img src="https://img.shields.io/github/downloads/yksr-melt/Meltype/total?color=ff8ab4" alt="downloads"></a>
+  <a href="https://github.com/roccho-dev/Meltype/releases/latest"><img src="https://img.shields.io/github/v/release/roccho-dev/Meltype?color=5ec4f0" alt="release"></a>
+  <a href="https://github.com/roccho-dev/Meltype/releases"><img src="https://img.shields.io/github/downloads/roccho-dev/Meltype/total?color=ff8ab4" alt="downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-7a96f0" alt="license"></a>
 </p>
 
@@ -22,11 +22,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yksr-melt/Meltype/releases/latest"><b>ダウンロード</b></a>
+  <a href="https://github.com/roccho-dev/Meltype/releases/latest"><b>ダウンロード</b></a>
   &nbsp;·&nbsp;
   <a href="docs/USAGE.md">使い方</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/yksr-melt/Meltype/issues/new/choose">不具合の報告・提案</a>
+  <a href="https://github.com/roccho-dev/Meltype/issues/new/choose">不具合の報告・提案</a>
+</p>
+
+<p align="center">
+<sub>このリポジトリ (roccho-dev/Meltype) は、雪代 / Yukishiro さんの <a href="https://github.com/yksr-melt/Meltype">Meltype</a> の fork です。配布・自動更新・報告はこの fork で行います。</sub>
 </p>
 
 <p align="center">
@@ -66,24 +70,23 @@ VS Code やターミナルでは英数が基本で、コメントと文字列の
 
 <img src="docs/images/headings/install.svg" alt="インストール" width="480"><br>
 
-1. [Releases](https://github.com/yksr-melt/Meltype/releases/latest) から `Meltype-<version>-setup.exe` をダウンロード
-2. 開いて、案内どおりに進める
+1. [Releases](https://github.com/roccho-dev/Meltype/releases/latest) から `Meltype-<version>-windows.zip` をダウンロードして展開
+2. 展開したフォルダーの `Install.cmd` をダブルクリック
 3. タスクトレイに「あ」が出たら準備完了！
 
-途中で Meltype IME を Windows に登録するための管理者権限の確認が出るので、「はい」を選んでください。断った場合は、変換ボックスで入力する Meltype キーボードで動きます。新しい版は自動で入ります。
+途中で Meltype IME を Windows に登録するための管理者権限の確認が出ます。使うなら「はい」を選んでください。断った場合は、変換ボックスで入力する Meltype キーボードで動きます。新しい版は、この fork のリリースから自動で入ります。
 
 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」。コード署名をしていないため表示されます。
 
 <details>
-<summary>zip 版・Mac 版・Linux 版</summary>
+<summary>Mac 版・Linux 版</summary>
 
 | | ファイル |
 |---|---|
-| Windows (zip) | `Meltype-<version>-windows.zip` を展開して `Install.cmd` をダブルクリック |
 | Mac (プレビュー版) | `Meltype-<version>-mac.zip` ([mac/README.md](mac/README.md)) |
 | Linux (プレビュー版) | `Meltype-<version>-linux.zip` (IBus / fcitx5) |
 
-インストーラーでも zip でも、入る場所は同じ `%LOCALAPPDATA%\Programs\Meltype` です。
+Windows 版は `%LOCALAPPDATA%\Programs\Meltype` に入ります。
 Windows 版に必要なのは Windows 10 / 11 (64bit) と Microsoft IME だけで、.NET は同梱しています。
 
 </details>
@@ -94,10 +97,11 @@ Windows 版に必要なのは Windows 10 / 11 (64bit) と Microsoft IME だけ�
 SmartScreen の警告とは別のものです。誤検知のこともありますが、検出名だけでは見分けられません。
 
 1. Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を新しくする
-2. 公式のリリースからダウンロードし直して、もう一度検査する
-3. それでも検出されるときは、保護を切ったりフォルダーを除外したりせずに、「保護の履歴」で検出名を確かめて [Issues](https://github.com/yksr-melt/Meltype/issues) で教えてください。個人名やパス、ダウンロード URL の一時トークンは隠してください
+2. この fork の [Releases](https://github.com/roccho-dev/Meltype/releases) からダウンロードし直して、もう一度検査する
+3. それでも検出されるときは、保護を切ったりフォルダーを除外したりせずに、「保護の履歴」で検出名を確かめて [Issues](https://github.com/roccho-dev/Meltype/issues) で教えてください。個人名やパス、ダウンロード URL の一時トークンは隠してください
 
 ファイルが本物か確かめたいときは、リリースのページにある SHA-256 と比べられます。PowerShell なら `Get-FileHash .\Meltype-<version>-windows.zip` です。
+この fork の GitHub Actions でビルドされたことは、`gh attestation verify .\Meltype-<version>-windows.zip --repo roccho-dev/Meltype` で確かめられます。
 
 </details>
 
@@ -105,7 +109,7 @@ SmartScreen の警告とは別のものです。誤検知のこともありま�
 <summary>アンインストール</summary>
 
 トレイのアイコンを右クリックして「アンインストール...」を選ぶか、Windows の「設定」→「アプリ」から消せます。
-インストーラーで入れた場合は、最後に設定と学習データも消すかを聞かれます。zip 版は `Uninstall.cmd` でも消せて、こちらは設定と学習データもまとめて消えます。
+zip を展開したフォルダーの `Uninstall.cmd` でも消せます。どれも設定と学習データもまとめて消えます。
 
 </details>
 
@@ -190,7 +194,7 @@ Meltype キーボードのときは、<kbd>Ctrl</kbd> + <kbd>半角/全角</kbd>
 
 [GNU GPL v3.0](LICENSE)。個人でも会社でも無料。GPL v3 の条件 (改造版もソースを公開) で、改造・再配布も自由です。
 
-ソースを公開せずに製品へ組み込みたいなど、GPL v3 で使えない場合はご相談ください: ibutya0319@gmail.com
+ソースを公開せずに製品へ組み込みたいなど、GPL v3 で使えない場合は、元のプロジェクトの著作者 (雪代 / Yukishiro) にご相談ください: ibutya0319@gmail.com
 
 <details>
 <summary>著作権表示・同梱物</summary>
@@ -267,7 +271,7 @@ General Public License for more details.
 不具合の報告、辞書の追加、Pull Request、どれも大歓迎です！
 
 <p align="center">
-  <a href="https://github.com/yksr-melt/Meltype/issues/new/choose"><img src="docs/images/cards/contribute-issue.svg" alt="不具合の報告" width="32%"></a>
+  <a href="https://github.com/roccho-dev/Meltype/issues/new/choose"><img src="docs/images/cards/contribute-issue.svg" alt="不具合の報告" width="32%"></a>
   <a href="CONTRIBUTING.md#辞書の追加"><img src="docs/images/cards/contribute-dictionary.svg" alt="辞書の追加" width="32%"></a>
   <a href="CONTRIBUTING.md"><img src="docs/images/cards/contribute-code.svg" alt="コードで協力" width="32%"></a>
 </p>

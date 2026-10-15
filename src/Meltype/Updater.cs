@@ -35,21 +35,32 @@ internal sealed class Updater : IDisposable
         _timer = new System.Threading.Timer(_ => Check(), null, FirstCheck, Interval);
     }
 
-    /// <summary>ダウンロード済みで、今より新しい版 (無ければ null)。</summary>
+    /// <summary>ダウンロード済みで、今より新しい版 (無ければ null)。自分の更新元 (UpdateRepository) から取ってきたものだけ。</summary>
     public static (string Version, string Folder)? Staged()
     {
         try
         {
             if (!File.Exists(ReadyFile)) return null;
-            var parts = File.ReadAllText(ReadyFile).Trim().Split('\t');
-            if (parts.Length != 2 || !IsNewer(parts[0]) || !File.Exists(Path.Combine(parts[1], "install.ps1"))) return null;
-            return (parts[0], parts[1]);
+            if (ParseReady(File.ReadAllText(ReadyFile), AppInfo.UpdateRepository) is not { } ready) return null;
+            if (!IsNewer(ready.Version) || !File.Exists(Path.Combine(ready.Folder, "install.ps1"))) return null;
+            return ready;
         }
         catch (Exception ex)
         {
             Log.Warn($"更新の状態を読めませんでした: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// ready.txt (update.ps1 が書く「版 TAB 展開した場所 TAB 取得元のリポジトリ」) を読む。
+    /// 取得元の無い前の形式 (2 列) や、取得元が repository と違うもの (ほかのリポジトリのリリース) は使わない (null)。
+    /// </summary>
+    internal static (string Version, string Folder)? ParseReady(string text, string repository)
+    {
+        var parts = text.Trim().Split('\t');
+        if (parts.Length != 3 || parts[0].Length == 0 || parts[1].Length == 0 || !string.Equals(parts[2], repository, StringComparison.Ordinal)) return null;
+        return (parts[0], parts[1]);
     }
 
     /// <summary>

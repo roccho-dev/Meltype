@@ -20,8 +20,4 @@
 - [ ] 判定・変換を変えたときは、報告された例をテストに足した
 - [ ] 辞書だけの変更
 - [ ] 実際に打って確かめた (OS とアプリ: )
-- [ ] AI を使った (使った部分: ) — 中身を理解し、自分で確かめた。**使ったら必ずチェックしてください** (書かずに AI で作ったものに見える場合はクローズすることがあります) ([AI の利用について](https://github.com/yksr-melt/Meltype/blob/main/CONTRIBUTING.md#ai-の利用について))
-
-## 貢献者ライセンス同意 (CLA)
-
-初めての方には、bot が CLA の文面をコメントします。同意していただける場合は、その Pull Request に「CLA に同意します」と 1 行だけコメントしてください。一度同意すれば次からは不要です。詳しくは https://github.com/yksr-melt/Meltype/blob/main/CONTRIBUTING.md
+- [ ] AI を使った (使った部分: ) — 中身を理解し、自分で確かめた。**使ったら必ずチェックしてください** (書かずに AI で作ったものに見える場合はクローズすることがあります) ([AI の利用について](https://github.com/roccho-dev/Meltype/blob/main/CONTRIBUTING.md#ai-の利用について))
