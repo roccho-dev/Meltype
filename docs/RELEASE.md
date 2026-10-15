@@ -1,82 +1,44 @@
-# リリースの手順
-
-## 版を出す (テスト版・公開版共通)
-
-1. 版を上げる: `src/Meltype/Meltype.csproj`・`src/Meltype.Core/Meltype.Core.csproj` の `<Version>`、
-   `mac/Resources/Info.plist` の `CFBundleShortVersionString`・`CFBundleVersion`、`mac/Sources/MeltypeIME/Converter.swift` の版。
-2. コミットして push し、タグを付けて push: `git tag v0.3.0 && git push origin v0.3.0`
-3. GitHub Actions が Windows (build.yml)・Mac (mac.yml)・Linux (linux.yml) の zip を作り、リリースに添付する。
-4. 公開版 (1.0.0 以降) なら、利用者の Meltype が自動で更新する (Windows)。
-
-## コード署名 (任意。1.0.0 の後でよい)
-
-署名しなくても配布できます (README に「詳細情報」→「実行」の案内と、zip の SHA-256 の確かめ方を書いている)。
-費用をかけない方法として、オープンソース向けに無料で署名する SignPath Foundation (要申し込み・審査、GitHub Actions でのビルドが前提) がある。
-ウイルス対策ソフトに誤検知されたら、Microsoft のサイトから誤検知として報告する (無料)。
+<a name="リリースの手順"></a>
+<img src="images/headings/release/title.svg" alt="リリースの手順" height="80">
 
 
-署名の無い実行ファイルは、Windows の SmartScreen が「発行元が不明」と警告し、キーボードを扱うソフトなのでウイルス対策ソフトに誤検知されやすい。
-Mac は署名と公証 (notarization) が無いと、Gatekeeper が開かせない。
+<br>
 
-### Windows
+<a name="版を出す"></a>
+<img src="images/headings/release/01.svg" alt="版を出す" height="53"><br>
 
-コード署名の証明書 (OV か EV。年 1〜数万円、個人でも取れる。または Azure Trusted Signing) を用意し、リポジトリの Settings → Secrets and variables → Actions に登録する。
 
-| 秘密 | 中身 |
-|---|---|
-| `SIGN_PFX_BASE64` | 証明書の .pfx を Base64 にしたもの (PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))`) |
-| `SIGN_PASSWORD` | .pfx のパスワード |
+この fork (roccho-dev/Meltype) は、GitHub のリリースの zip だけで配布します。インストーラー (setup.exe)・winget・Scoop・Homebrew には出しません。
 
-登録すると、`Build-Package.ps1` が Meltype.exe・dll・Mozc のヘルパーにタイムスタンプ付きで署名する。手元では環境変数 `MELTYPE_SIGN_PFX` と `MELTYPE_SIGN_PASSWORD` で同じことができる。
-(EV 証明書はハードウェアトークンに入っていて CI では使えないことが多い。その場合は Azure Trusted Signing を検討する)
+1. 版を上げる
+   - `src/Meltype/Meltype.csproj`・`src/Meltype.Core/Meltype.Core.csproj` の `<Version>`。版は数字 4 つ (`1.2.1.2` など。`System.Version` で比べられる形) にする
+   - `mac/Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` (Mac 版の表示の版は Info.plist から読みます)
+2. コミットして main に入れ、同じ版のタグを付けて push する: `git tag v1.2.1.2 && git push origin v1.2.1.2`
+3. GitHub Actions が Windows (build.yml)・Mac (mac.yml)・Linux (linux.yml) の配布物を作り、リリースに付ける
+   - Windows: `Meltype-<版>-windows.zip`。build.yml は、タグの版とビルドした `Meltype.exe` の版 (ProductVersion) が違えば止まり、zip にビルドの出自の証明 (artifact attestation) を付けます
+   - Mac: `Meltype-<版>-mac.zip`、Linux: `Meltype-<版>-linux.zip` (どちらもプレビュー版)
+4. リリースのページにリリースノートを書く (プレリリースにはしない。自動更新は最新のリリース (latest) だけを見ます)
+5. 使っている人の Meltype (Windows) は、自動で新しい版に更新されます (この fork のリリースだけを見ます)
 
-### Mac
+配布物の出自は `gh attestation verify <zip> --repo roccho-dev/Meltype` で確かめられます。
 
-Apple Developer Program (年 99 ドル) に入り、「Developer ID Application」の証明書を作って次を登録する。
+<br>
 
-| 秘密 | 中身 |
-|---|---|
-| `MAC_CERT_P12_BASE64` | 証明書と秘密鍵を書き出した .p12 を Base64 にしたもの |
-| `MAC_CERT_PASSWORD` | .p12 のパスワード |
-| `MAC_IDENTITY` | `Developer ID Application: 名前 (チーム ID)` |
-| `NOTARY_APPLE_ID` / `NOTARY_TEAM_ID` / `NOTARY_PASSWORD` | 公証に使う Apple ID・チーム ID・App 用パスワード |
+<a name="同梱の-net-の更新"></a>
+<img src="images/headings/release/02.svg" alt="同梱の .NET の更新" height="53"><br>
 
-登録すると、mac.yml が配布用に署名し (Hardened Runtime)、公証してから zip にする。
 
-## GitHub の設定 (公開するとき)
+配布物の .NET の版は、どこにも固定していません。ビルドのたびに setup-dotnet (`10.0.x`) がその時の最新の SDK とランタイムを入れます。
+Windows は `Build-Package.ps1` が、入っている最新の 10.0 のランタイムを `app\dotnet` に同梱し、Mac・Linux は NativeAOT で組み込みます。
+なので、.NET に新しいパッチ (セキュリティの修正など) が出たら、コードを変えずに版を上げてリリースし直せば済みます。
+.NET のメジャー版を上げる (net10.0 → net11.0) ときは、`*.csproj` の `TargetFramework` と、ワークフローの `dotnet-version` を手で変えます。
 
-- リポジトリを Public にする (自動更新・Issue・bot が外から使えるようになる)。
-- Settings → Security → **Private vulnerability reporting** を ON (SECURITY.md の報告先)。
-- Settings → Branches → main のブランチ保護: 必須のチェックに **CLA**・**build**・**精度の比較**・**辞書の形式** を入れる。
-- (任意) bot の名前を変える: GitHub App を作り、変数 `BOT_APP_ID` と秘密 `BOT_APP_PRIVATE_KEY` を登録 (CONTRIBUTING.md の bot の項)。
-- 不具合報告のフォーム: [tools/report-form/README.md](../tools/report-form/README.md) の手順で作り、`src/Meltype.Core/Config/ProjectInfo.cs` の `ReportForm` に URL を書く。
+<br>
 
-## パッケージマネージャー (公開版)
+<a name="github-の設定"></a>
+<img src="images/headings/release/03.svg" alt="GitHub の設定" height="53"><br>
 
-リリースの zip から、winget・Scoop・Homebrew のマニフェストを作る。
 
-```
-node tools/make-manifests.mjs 1.0.0 dist/Meltype-1.0.0-windows.zip dist/Meltype-1.0.0-mac.zip
-```
-
-`dist/manifests/` にできたものを出す。
-
-- **winget**: `winget/manifests/...` を [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) に Pull Request で出す (`winget validate` で確かめてから)。
-  審査があり、署名の無い実行ファイルは止められることがある。
-- **Scoop**: 自分のバケット (例: `yksr-melt/scoop-bucket`) を作り、`scoop/meltype.json` を `bucket/` に置く。利用者は `scoop bucket add yksr-melt https://github.com/yksr-melt/scoop-bucket` → `scoop install meltype`。
-- **Homebrew**: 自分の tap (例: `yksr-melt/homebrew-tap`) を作り、`homebrew/Casks/meltype.rb` を置く。利用者は `brew install --cask yksr-melt/tap/meltype`。
-
-winget・Scoop で入れた場合は Install.cmd を使わないので、Windows の起動時に起動するには、トレイの「Windows の起動時に起動」を ON にしてもらう。
-
-## 公開版 (1.0.0) の前の確認
-
-- [ ] 判定・変換の精度 (v0.3.1〜v0.3.3 で変換のバグ修正・辞書の拡張)
-- [x] 協力者のお名前を載せる (README の「協力してくださった方々」)
-- [ ] リポジトリを Public にし、上の GitHub の設定をする
-- [x] Mac 版・Linux 版を「プレビュー版」と明記 (README。リリースノートにも書く)
-- [x] リリースの zip の名前を `Meltype-<版>-windows.zip`・`-mac.zip`・`-linux.zip` に (タグのビルドだけ。テスト版は `Meltype-test-<日時>.zip` のまま。自動更新は両方の名前を探す)
-- [x] Discord の bot (tools/discord-bot) を消す (テスター用だったため)
-- [ ] リリースノートに zip の SHA-256 を載せる (GitHub のリリースのページにも出る)
-- [x] README を一般の人向けにし、詳しい使い方を docs/USAGE.md、開発の話を docs/DEVELOPMENT.md に分ける
-
-1.0.0 の後でよいもの: コード署名 (Windows・Mac。上の「コード署名」)、不具合報告のフォーム (無い間は「不具合の報告・提案...」が GitHub の Issue の画面を開く)、winget・Scoop・Homebrew への登録。
+- Settings → Security → **Private vulnerability reporting** を ON にする ([SECURITY.md](../SECURITY.md) の報告先)
+- Settings → General → Features → **Issues** を ON にする (アプリの「不具合の報告・提案...」はこの fork の Issue を開きます)
+- Settings → Branches → main のブランチ保護で、必須のチェックに **build**・**精度の比較**・**辞書の形式** を入れる

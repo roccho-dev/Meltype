@@ -15,7 +15,10 @@ in pkgs.stdenvNoCC.mkDerivation {
     dontBuild = true;
     installPhase = ''
       mkdir -p "$out/lib/meltype" "$out/bin"
-      cp -r . "$out/lib/meltype/"
+      # The shared Linux ZIP also contains IBus/fcitx5 products. Select only
+      # this entry's runtime; do not introduce addon dependencies into B.
+      cp libMeltypeNative.so LICENSE THIRD-PARTY-NOTICES.md "$out/lib/meltype/"
+      cp -r mozc tty "$out/lib/meltype/"
       chmod +x "$out/lib/meltype/mozc/meltype_mozc_helper"
       font=${cjk}/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc
       test -r "$font" || exit 1

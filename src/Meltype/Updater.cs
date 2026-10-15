@@ -35,15 +35,15 @@ internal sealed class Updater : IDisposable
         _timer = new System.Threading.Timer(_ => Check(), null, FirstCheck, Interval);
     }
 
-    /// <summary>ダウンロード済みで、今より新しい版 (無ければ null)。</summary>
+    /// <summary>ダウンロード済みで、今より新しい版 (無ければ null)。自分の更新元 (UpdateRepository) から取ってきたものだけ。</summary>
     public static (string Version, string Folder)? Staged()
     {
         try
         {
             if (!File.Exists(ReadyFile)) return null;
-            var parts = File.ReadAllText(ReadyFile).Trim().Split('\t');
-            if (parts.Length != 2 || !IsNewer(parts[0]) || !File.Exists(Path.Combine(parts[1], "install.ps1"))) return null;
-            return (parts[0], parts[1]);
+            if (ParseReady(File.ReadAllText(ReadyFile), AppInfo.UpdateRepository) is not { } ready) return null;
+            if (!IsNewer(ready.Version) || !File.Exists(Path.Combine(ready.Folder, "install.ps1"))) return null;
+            return ready;
         }
         catch (Exception ex)
         {
@@ -53,10 +53,21 @@ internal sealed class Updater : IDisposable
     }
 
     /// <summary>
+    /// ready.txt (update.ps1 が書く「版 TAB 展開した場所 TAB 取得元のリポジトリ」) を読む。
+    /// 取得元の無い前の形式 (2 列) や、取得元が repository と違うもの (ほかのリポジトリのリリース) は使わない (null)。
+    /// </summary>
+    internal static (string Version, string Folder)? ParseReady(string text, string repository)
+    {
+        var parts = text.Trim().Split('\t');
+        if (parts.Length != 3 || parts[0].Length == 0 || parts[1].Length == 0 || !string.Equals(parts[2], repository, StringComparison.Ordinal)) return null;
+        return (parts[0], parts[1]);
+    }
+
+    /// <summary>
     /// 起動時: ダウンロード済みの新しい版があればインストールを始める (true なら Meltype はそのまま終了する。install.ps1 が新しい版を起動する)。
     /// 前回インストールに失敗していた (同じ版のまま起動した) ときは、繰り返さない。
     /// </summary>
-    public static bool ApplyStagedAtStartup(Func<bool> enabled)
+    public static bool ApplyStagedAtStartup(Func<bool> enabled, Func<string, bool>? confirm = null)
     {
         try
         {
@@ -76,7 +87,8 @@ internal sealed class Updater : IDisposable
         {
             Log.Warn($"更新の状態を読めませんでした: {ex.Message}");
         }
-        return enabled() && Apply();
+        // 更新の前に、あなたの打ち方で変わる語があれば見せる (issue #285。「あとで」なら今回は更新しない)
+        return enabled() && Staged() is { } staged && (confirm?.Invoke(staged.Version) ?? true) && Apply();
     }
 
     /// <summary>ダウンロード済みの新しい版のインストールを始める。install.ps1 が動いている Meltype を終了させてから入れ替え、起動する。</summary>
@@ -101,6 +113,51 @@ internal sealed class Updater : IDisposable
         {
             Log.Warn($"更新を始められませんでした: {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// 更新の前に「あなたの打ち方で変わる語」を調べる (issue #285)。自分で英字 / かなに直した語 (languages.json) を、
+    /// 今の版とダウンロードした新しい版 (Meltype.exe --judge-words) の両方で判定し、見え方が変わる語を返す。
+    /// 調べられなければ (新しい版がこの仕組みを持たない・時間切れ) null。この PC の中だけで動かし、何も送らない。
+    /// </summary>
+    public static IReadOnlyList<Composition.WordChange>? PreviewChanges(IEnumerable<string> words)
+    {
+        if (Staged() is not { } staged) return null;
+        var list = words.Where(Composition.WordJudge.IsWord).Distinct(StringComparer.Ordinal).ToList();
+        if (list.Count == 0) return [];
+        var exe = Path.Combine(staged.Folder, "app", "Meltype.exe");
+        if (!File.Exists(exe)) return null;
+        var input = Path.Combine(Directory, "judge-words.txt");
+        var output = Path.Combine(Directory, "judge-result.txt");
+        try
+        {
+            File.WriteAllLines(input, list);
+            File.Delete(output);
+            var start = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
+            foreach (var arg in new[] { "--judge-words", input, output }) start.ArgumentList.Add(arg);
+            using var process = Process.Start(start)!;
+            if (!process.WaitForExit(60_000))
+            {
+                process.Kill();
+                Log.Warn("新しい版の判定が時間内に終わりませんでした。変わる語は調べずに更新します。");
+                return null;
+            }
+            if (process.ExitCode != 0 || !File.Exists(output)) return null;
+            var next = Composition.WordJudge.Parse(File.ReadAllText(output));
+            var now = Composition.WordJudge.Parse(Program.JudgeWords(list));
+            var changes = Composition.WordJudge.Changes(now, next);
+            Log.Info($"Meltype {staged.Version} で見え方が変わる語: {changes.Count} 語 (調べた語 {list.Count})。");
+            return changes;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"新しい版で変わる語を調べられませんでした: {ex.Message}");
+            return null;
+        }
+        finally
+        {
+            try { File.Delete(input); File.Delete(output); } catch { }
         }
     }
 

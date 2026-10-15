@@ -1,10 +1,13 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Yukishiro
 
+# -Ask: Install.cmd から自分で実行したとき。前に Meltype IME の登録を断っていても、もう一度聞く (自動更新では聞かない)
+param([switch]$Ask)
+
 $ErrorActionPreference = 'Stop'
 
 # Meltype のインストール。ビルド済みの app フォルダーを %LOCALAPPDATA%\Programs\Meltype にコピーし、
-# スタートアップとスタートメニューに登録して起動する。管理者権限は不要。.NET は app の dotnet フォルダーに同梱しているので、インストール不要。
+# スタートアップとスタートメニューに登録して起動する。管理者権限は不要 (Meltype IME を登録するときだけ UAC で求める)。.NET は app の dotnet フォルダーに同梱しているので、インストール不要。
 
 $source = Join-Path $PSScriptRoot 'app'
 $target = Join-Path $env:LOCALAPPDATA 'Programs\Meltype'
@@ -52,9 +55,9 @@ Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
 if (-not (Test-Path -LiteralPath $exe)) {
     Write-Host "コピーした Meltype.exe が見つかりません: $exe"
     Write-Host 'ウイルス対策ソフトが Meltype を止めた可能性があります。'
-    Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、公式の ZIP を再ダウンロードして再検査してください。'
+    Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、https://github.com/roccho-dev/Meltype/releases の ZIP を再ダウンロードして再検査してください。'
     Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の履歴」で検出名を確認してください。誤検知かどうかは、この状態だけでは判断できません。'
-    Write-Host '保護を無効にしたり「許可」に変更したりせず、版と検出名を https://github.com/yksr-melt/Meltype/issues に報告してください (個人名やパスは隠してください)。'
+    Write-Host '保護を無効にしたり「許可」に変更したりせず、版と検出名を https://github.com/roccho-dev/Meltype/issues に報告してください (個人名やパスは隠してください)。'
     exit 1
 }
 
@@ -65,6 +68,7 @@ Get-ChildItem -LiteralPath $target -Recurse -File | Unblock-File -ErrorAction Si
 # 前は zip を展開したフォルダーの Uninstall.cmd しか無く、zip を消していると探し直す手間がかかった。
 $uninstaller = Join-Path $target 'uninstall.ps1'
 $uninstallSource = Join-Path $PSScriptRoot 'uninstall.ps1'
+# この版はインストーラー (setup.exe) を配らず、zip の install.ps1 だけで入れる。項目はいつもこのスクリプトが作る。
 if (Test-Path -LiteralPath $uninstallSource) {
     Copy-Item -LiteralPath $uninstallSource -Destination $uninstaller -Force
     Unblock-File -LiteralPath $uninstaller -ErrorAction SilentlyContinue
@@ -78,11 +82,25 @@ if (Test-Path -LiteralPath $uninstallSource) {
         DisplayIcon     = $exe
         InstallLocation = $target
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstaller`" -FromSettings"
-        URLInfoAbout    = 'https://github.com/yksr-melt/Meltype'
+        URLInfoAbout    = 'https://github.com/roccho-dev/Meltype'
     }
     foreach ($name in $values.Keys) { Set-ItemProperty -Path $key -Name $name -Value $values[$name] }
     foreach ($name in 'NoModify', 'NoRepair') { Set-ItemProperty -Path $key -Name $name -Value 1 -Type DWord }
     Set-ItemProperty -Path $key -Name EstimatedSize -Value $size -Type DWord
+}
+
+# Meltype IME (入力欄に直接入力)。登録には管理者権限が要る。断られたら、今までどおり変換ボックスで入力する方式で使う
+$imeScript = Join-Path $target 'meltype-ime.ps1'
+if ((Test-Path -LiteralPath $imeScript) -and (Test-Path -LiteralPath (Join-Path $target 'tip'))) {
+    # 失敗しても、ショートカットを作って Meltype を起動するところまでは続ける (自動更新で Meltype が止まったままにならないように)
+    try {
+        . $imeScript
+        # 自分で実行したとき (-Ask) か、もう登録してある (DLL を入れ替える) ときだけ。頼まれていないのに管理者権限の確認を出さない
+        if ($Ask -or (Test-MeltypeImeRegistered)) { Install-MeltypeIme -Source (Join-Path $target 'tip') -Ask:$Ask | Out-Null }
+    }
+    catch {
+        Write-Host "Meltype IME を登録できませんでした (変換ボックスで入力する方式で使えます): $($_.Exception.Message)"
+    }
 }
 
 # 自動起動と、スタートメニュー・Windows 検索からの起動用 (現在のユーザー)

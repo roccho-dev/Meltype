@@ -9,11 +9,14 @@ namespace Meltype.Config;
 /// <summary>Windows 版・Mac 版・Linux 版で共通の、プロジェクトの情報と不具合報告の URL。</summary>
 public static class ProjectInfo
 {
-    public const string SourceUrl = "https://github.com/yksr-melt/Meltype";
+    /// <summary>
+    /// この版のソースコードと不具合報告の場所 (fork)。元のプロジェクトは https://github.com/yksr-melt/Meltype (雪代 / Yukishiro)。
+    /// </summary>
+    public const string SourceUrl = "https://github.com/roccho-dev/Meltype";
 
     /// <summary>
     /// 不具合報告のフォーム (Google フォームの「事前入力した URL」。OS に Windows 11、版に 0.0.0、実行環境に ENV を入れて作ったもの)。
-    /// 空なら GitHub の Issue の画面を開く。作り方は tools/report-form/README.md。
+    /// 空なら GitHub の Issue の画面 (SourceUrl の issues) を開く。
     /// </summary>
     public const string ReportForm = "";
 
@@ -44,6 +47,20 @@ public static class ProjectInfo
     public static string GitHubReportUrl(string template, string os, string version, string environment) =>
         $"{SourceUrl}/issues/new?template={Uri.EscapeDataString(template)}&os={Uri.EscapeDataString(os)}" +
         $"&version={Uri.EscapeDataString(version)}&environment={Uri.EscapeDataString(environment)}";
+
+    /// <summary>
+    /// 自分で直した誤判定を、「変換・判定の間違い」のひな形 (2-misdetection.yml) に入れた状態で開く URL (issue #284)。
+    /// 欄の id (kind・typed・actual・expected・key・context) は、ひな形と合わせる。
+    /// </summary>
+    public static string MisdetectionReportUrl(Composition.Correction correction, string os, string version, string environment) =>
+        GitHubReportUrl("2-misdetection.yml", os, version, environment) +
+        $"&title={Uri.EscapeDataString("[誤判定] " + correction.Typed)}" +
+        $"&kind={Uri.EscapeDataString(correction.Kind)}" +
+        $"&typed={Uri.EscapeDataString(correction.Typed)}" +
+        $"&actual={Uri.EscapeDataString(correction.Shown)}" +
+        $"&expected={Uri.EscapeDataString(correction.Corrected)}" +
+        $"&key={Uri.EscapeDataString(correction.LastKey)}" +
+        $"&context={Uri.EscapeDataString(correction.Before)}";
 
     /// <summary>Mac 版・Linux 版の実行環境 (不具合報告に入れる。入力した文字は入れない)。</summary>
     public static string Environment(Settings settings, string platform) => string.Join("\n",

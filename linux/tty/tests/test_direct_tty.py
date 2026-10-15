@@ -58,6 +58,14 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(app.UnsafeEffect, "DeleteBefore"):
             app.InputBridge(native).feed(b"k")
 
+    def test_expected_text_does_not_authorize_a_pty_deletion(self):
+        # main's Expect is useful evidence for a real editable target, not a
+        # capability to delete text held by an arbitrary child application.
+        with self.assertRaisesRegex(app.UnsafeEffect, "DeleteBefore"):
+            app.effect_bytes({"consumed": True, "commits": [
+                {"deleteBefore": 0, "text": "not yet written"},
+                {"deleteBefore": 2, "text": "replace", "expect": "日本"}], "view": None})
+
     def test_newline_and_ansi_in_unconfirmed_commit_refused(self):
         for payload in ["rm -rf /\n", "\x1b[2J", "\x00"]:
             with self.subTest(payload=payload), self.assertRaises(app.UnsafeEffect):
@@ -136,9 +144,12 @@ int meltype_init_mozc(const char* h, const char* p) { (void)h; (void)p; return 1
 void* meltype_create(void) { return malloc(1); }
 void meltype_destroy(void* p) { free(p); }
 void meltype_set_direct(void* p, int n) { (void)p; (void)n; }
+static int can_delete = -1;
+void meltype_set_can_delete(void* p, int n) { (void)p; can_delete = n; }
 void meltype_free(void* p) { free(p); }
 void* meltype_handle_key(void* p, int vk, int ch, int m, const char* b, const char* a) {
   (void)p; (void)vk; (void)ch; (void)m; (void)b; (void)a;
+  if (can_delete != 0) return NULL;
   const char *json = "{\\\"consumed\\\":true,\\\"commits\\\":[{\\\"deleteBefore\\\":0,\\\"text\\\":\\\"日本語\\\"}],\\\"view\\\":null}";
   char *r = malloc(strlen(json)+1); strcpy(r,json); return r;
 }

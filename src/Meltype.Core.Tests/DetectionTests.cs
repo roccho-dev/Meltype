@@ -29,13 +29,10 @@ internal static class DetectionTests
         }
     }
 
-    // ---- 設計書 §30 テスト方針 ----
-
     [Test] public static void Design_Japanese() => ExpectJapanese("konnichiwa", "arigatou", "ohayou", "watashi", "ashita");
 
     [Test] public static void Design_Typo() => ExpectJapanese("konnitiwa", "konnichia", "arigatouu");
 
-    // 報告: 英数状態で OK の後に notasuku (のタスク) と打っても日本語に戻らない。fucarete (c 行) も。
     [Test] public static void ParticleThenWord_AndCRow() => ExpectJapanese("notasuku", "gamenwo", "fucarete");
 
     [Test] public static void Design_English() => ExpectNotJapanese("hello", "github", "typescript", "javascript", "server", "terminal");
@@ -43,7 +40,6 @@ internal static class DetectionTests
     [Test]
     public static void Design_TechnicalInput()
     {
-        // Space でセッションが切れるので単語ごとに判定される。
         foreach (var line in new[] { "npm install", "git commit", "git push", "localhost", "http://" })
         {
             foreach (var word in line.Split(' ')) ExpectNotJapanese(word);
@@ -54,15 +50,12 @@ internal static class DetectionTests
 
     [Test] public static void Design_RomajiReadableEnglishIsNotEnough() => ExpectNotJapanese("kana", "sushi", "radio");
 
-    // ---- 追加の確認 ----
-
     [Test]
     public static void MoreJapanese() => ExpectJapanese(
         "kyou", "desu", "masu", "sugoi", "tabemasu", "shigoto", "tomodachi", "daijoubu", "yoroshiku", "otsukare",
         "sumimasen", "onegaishimasu", "hontou", "mainichi", "nihongo", "kaigi", "shiryou", "kakunin", "ryoukai",
         "wakarimashita", "itadakimasu", "gomennasai", "zenzen", "chotto", "tanoshii", "kanashii", "benri");
 
-    // 実機のログで見逃していた語 (him → 保留切れ, onakag → 辞書になし)。
     [Test]
     public static void ReportedMisses() => ExpectJapanese("himadana", "onakagasuita", "nemui", "tsukareta", "oishii", "ganbatte", "yukkuri");
 
@@ -107,10 +100,37 @@ internal static class DetectionTests
     }
 
     [Test]
+    public static void ObviousEnglishKeysRemainKanaInKanaCapableStyles()
+    {
+        var expectedKana = new Dictionary<int, string>
+        {
+            [0x51] = "た", // Q
+            [0x58] = "さ", // X
+            [0x56] = "ひ", // V
+            [0x4C] = "り", // L
+        };
+
+        foreach (var style in new[] { InputStyle.Kana, InputStyle.Both })
+        {
+            var settings = DefaultSettings();
+            settings.InputStyle = style;
+            var engine = CreateEngine(settings);
+
+            foreach (var (key, kana) in expectedKana)
+            {
+                var letter = char.ToLowerInvariant((char)key).ToString();
+                var result = engine.Evaluate(new DetectionInput(letter, [key], true));
+                Assert.True(result.Verdict != Verdict.English, $"{style}: {letter.ToUpperInvariant()} は JIS かな入力の {kana} として扱う: {result.Describe()}");
+                Assert.Equal(kana, KanaDetector.ToKana([key]));
+            }
+        }
+    }
+
+    [Test]
     public static void EnglishIsDecidedEarly()
     {
-        // 待ち時間を減らすため、ローマ字として成立しなくなった時点で英語と確定する。
         Assert.Equal("hel", Classify(Engine, "hello").Text);
+        // the → てぇ は CompositionTable のみ。th は英語辞書の接頭辞で EN+3 となり、th 時点で英語確定する。
         Assert.Equal("th", Classify(Engine, "the").Text);
         Assert.Equal("np", Classify(Engine, "npm").Text);
     }
@@ -138,7 +158,6 @@ internal static class DetectionTests
         var settings = DefaultSettings();
         settings.InputStyle = InputStyle.Kana;
         var engine = CreateEngine(settings);
-        // こんにちは (JIS かな配列: こ=B ん=Y に=I ち=A は=F)
         int[] keys = [0x42, 0x59, 0x49, 0x41, 0x46];
         DetectionResult? result = null;
         for (var i = 1; i <= keys.Length; i++)
@@ -149,7 +168,6 @@ internal static class DetectionTests
         }
         Assert.Equal(Verdict.Japanese, result!.Verdict, result.Describe());
         Assert.Equal("こんにちは", KanaDetector.ToKana(keys));
-        // 濁点キー (@) は直前の文字に合成される: か + ゛ = が
         Assert.Equal("が", KanaDetector.ToKana([0x54, 0xC0]));
     }
 
@@ -166,10 +184,39 @@ internal static class DetectionTests
         Assert.Equal("し", romaji.AnalyzeFragment("ci").Kana);
         Assert.True(!romaji.Analyze("ci").IsValid, "ci は変換ボックス専用");
         Assert.True(romaji.Analyze("ky").IsValid, "入力途中の子音は有効");
-        Assert.True(!romaji.Analyze("th").IsValid, "th は不正");
+        Assert.True(romaji.Analyze("th").IsValid, "th は有効な部分ローマ字 (tha/thu/tho の前置詞)");
         Assert.True(!romaji.Analyze("np").IsValid, "語頭の ん は不正");
         Assert.True(!romaji.Analyze("kkk").IsValid, "語頭の っ は不正");
         Assert.True(romaji.Analyze("kyou").StrongYouon == 1, "拗音");
+    }
+
+    [Test]
+    public static void Romaji_NewConversions()
+    {
+        var romaji = new RomajiDetector();
+        // Issue #92: 判定用 Table のペア
+        Assert.Equal("てゃ", romaji.Analyze("tha").Kana);
+        Assert.Equal("てゅ", romaji.Analyze("thu").Kana);
+        Assert.Equal("てょ", romaji.Analyze("tho").Kana);
+        Assert.Equal("でゃ", romaji.Analyze("dha").Kana);
+        Assert.Equal("でゅ", romaji.Analyze("dhu").Kana);
+        Assert.Equal("でょ", romaji.Analyze("dho").Kana);
+        Assert.Equal("にぃ", romaji.Analyze("nyi").Kana);
+        Assert.Equal("にぇ", romaji.Analyze("nye").Kana);
+        Assert.Equal("とぁ", romaji.Analyze("twa").Kana);
+        Assert.Equal("とぃ", romaji.Analyze("twi").Kana);
+        Assert.Equal("とぇ", romaji.Analyze("twe").Kana);
+        Assert.Equal("とぅ", romaji.Analyze("twu").Kana);
+        Assert.Equal("どぁ", romaji.Analyze("dwa").Kana);
+        Assert.Equal("どぃ", romaji.Analyze("dwi").Kana);
+        Assert.Equal("どぇ", romaji.Analyze("dwe").Kana);
+        Assert.Equal("どぅ", romaji.Analyze("dwu").Kana);
+        // CompositionTable のみ (the は英語最頻出、q は1キーで英語確定するため判定用 Table には入れない)
+        Assert.Equal("てぇ", romaji.AnalyzeFragment("the").Kana);
+        Assert.Equal("でぇ", romaji.AnalyzeFragment("dhe").Kana);
+        Assert.Equal("くぃ", romaji.AnalyzeFragment("qi").Kana);
+        Assert.Equal("くぇ", romaji.AnalyzeFragment("qe").Kana);
+        Assert.Equal("くぉ", romaji.AnalyzeFragment("qo").Kana);
     }
 
     [Test]
@@ -205,7 +252,7 @@ internal static class DetectionTests
     [Test]
     public static void Describe_HidesTypedText_UnlessRecordTextIsOn()
     {
-        // ログに出す判定の説明に、打った文字 (「kyouha」や、理由の中の「kyou」と一致 など) を出さない (入力した文字をログに出す設定が OFF のとき)
+        // ログに出す判定の説明に、打った文字を出さない (入力した文字をログに出す設定が OFF のとき)
         var result = Engine.Evaluate(new DetectionInput("kyouha", "KYOUHA".Select(c => (int)c).ToArray(), true));
         var before = Diagnostics.Log.RecordText;
         try
@@ -220,5 +267,55 @@ internal static class DetectionTests
         {
             Diagnostics.Log.RecordText = before;
         }
+    }
+
+    [Test]
+    public static void CustomRomajiTable_ExtendsSpellings()
+    {
+        // 拡張ローマ字 (AZIK) をユーザーのローマ字の表 (romaji.txt) で足せる (issue #125)
+        var table = RomajiDetector.ParseCustomTable("# AZIK の一部\nkz\tかん\nkk\tきん\nkq\tかい\nsh すう\nbad;\tだめ\n");
+        Assert.True(!table.ContainsKey("bad;"), "英字以外を含む綴りは読まない");
+        var romaji = new RomajiDetector(table);
+        Assert.Equal("かんじ", romaji.AnalyzeFragment("kzji").Kana);
+        Assert.Equal("きんし", romaji.AnalyzeFragment("kksi").Kana + romaji.AnalyzeFragment("kksi").Partial, "kk は っ ではなく表の きん");
+        Assert.Equal("かいしゃ", romaji.AnalyzeFragment("kqsya").Kana);
+        var partial = romaji.AnalyzeFragment("k");
+        Assert.True(partial.IsValid && partial.Partial == "k", "表の綴りの打ちかけは続きを待つ");
+        // 表に無い綴りは今までどおり
+        Assert.Equal("かった", romaji.AnalyzeFragment("katta").Kana);
+        Assert.Equal("きっく", new RomajiDetector().AnalyzeFragment("kikku").Kana, "表が無ければ kk は っ");
+        var plain = new RomajiDetector();
+        Assert.Equal("しんぶん", plain.AnalyzeFragment("shinnbunn").Kana, "表が無ければ sh・nn も今までどおり");
+        Assert.Equal("ん", plain.AnalyzeFragment("nn").Kana);
+    }
+
+    [Test]
+    public static void CustomRomajiTable_AzikSampleKeepsCommonSpellings()
+    {
+        // 同梱の AZIK の例 (docs/romaji-azik-sample.txt) を読んでも、ふつうのローマ字の語は今までどおり読める (AZIK では sh は すう なので し は si)
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "docs", "romaji-azik-sample.txt"))) dir = Path.GetDirectoryName(dir);
+        Assert.True(dir is not null, "docs/romaji-azik-sample.txt が見つからない");
+        var table = RomajiDetector.ParseCustomTable(File.ReadAllText(Path.Combine(dir!, "docs", "romaji-azik-sample.txt")));
+        Assert.True(table.Count >= 50, "例の綴りを読む: " + table.Count);
+        var romaji = new RomajiDetector(table);
+        foreach (var (typed, kana) in new[] { ("arigatou", "ありがとう"), ("nihongo", "にほんご"), ("watasi", "わたし"), ("katta", "かった"), ("kz", "かん") })
+            Assert.Equal(kana, romaji.AnalyzeFragment(typed).Kana, typed);
+    }
+
+    [Test]
+    public static void CustomRomajiTable_LoadsFromUserDirectory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"meltype-romaji-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "romaji.txt"), "kz\tかん\n");
+            var detector = Composition.CompositionDetector.CreateDefault(dir);
+            var text = new Composition.CompositionText(detector);
+            foreach (var c in "kzji") text.Append(c);
+            Assert.Equal("かんじ", text.Display(final: true));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 }

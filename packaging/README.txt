@@ -4,7 +4,8 @@
 雪解けのように、半角/全角の壁を溶かす日本語入力。
 
 半角/全角 キーを押さなくても、日本語と英語を打ち分けられるようにする Windows 用のツールです。
-詳しい使い方: https://github.com/yksr-melt/Meltype/blob/main/docs/USAGE.md
+詳しい使い方: https://github.com/roccho-dev/Meltype/blob/main/docs/USAGE.md
+配布元 (この zip の新しい版): https://github.com/roccho-dev/Meltype/releases
 
 ※ 以前「AutoIME」という名前のテスト版を使っていた方: Install.cmd を実行すると古い AutoIME は自動で片付けられ、
    設定と学習データは引き継がれます。
@@ -24,12 +25,19 @@
 3. 画面右下のタスクトレイに「あ」のアイコンが出れば動いています
    Windows の起動時にも自動で起動します
 
+■ Meltype IME (入力欄に直接入力)
+インストールの途中で「Meltype IME を Windows に登録します」と出て、管理者権限の確認が出ます。
+「はい」を選ぶと、打った文字が入力欄にそのまま下線付きで入り、変換の候補は入力位置の下に一覧で出るようになります。
+・Win + Space で「Meltype」を選んで使います
+・アイコンを右クリック →「Meltype キーボード (変換ボックスで入力)」を選ぶと、下の「使い方」の方式に戻せます
+・「いいえ」を選んでも、下の「使い方」の方式で使えます (Install.cmd をもう一度実行すると、また聞きます)
+
 ■ 使い方
 ※ 「ウイルスを検出しました」などの脅威検出は、SmartScreen の警告とは別です。
-   Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、公式の ZIP を再ダウンロードして再検査してください。
+   Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、配布元 (上記の releases) の ZIP を再ダウンロードして再検査してください。
    誤検知かどうかは検出名だけでは判断できません。保護を無効にしたり除外・許可に変更したりせず、
    Windows セキュリティの「保護の履歴」で検出名を確認し、版と検出名を報告してください。
-   報告先: https://github.com/yksr-melt/Meltype/issues (個人名・パス・ダウンロード URL の一時トークンは隠してください)
+   報告先: https://github.com/roccho-dev/Meltype/issues (個人名・パス・ダウンロード URL の一時トークンは隠してください)
 
 メモ帳やブラウザの入力欄で、IME を気にせずそのままローマ字で打ってください。
 ・日本語はかなで、英単語 (google, hello など) は英字のまま、カーソルの下の変換ボックスに出ます
@@ -99,5 +107,6 @@ Windows の「設定」→「アプリ」→「インストールされている
 
 ■ ライセンス
 Meltype は GNU GPL v3 (LICENSE.txt) で配布しています。無保証です。
-ソースコード: https://github.com/yksr-melt/Meltype
+ソースコード: https://github.com/roccho-dev/Meltype
+元のプロジェクト: https://github.com/yksr-melt/Meltype (雪代 / Yukishiro)
 同梱の .NET ランタイム (app\dotnet) は MIT ライセンスです。

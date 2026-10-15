@@ -50,12 +50,17 @@ class NativeSession:
         self.lib.meltype_commit.restype = ctypes.c_void_p
         self.lib.meltype_free.argtypes = [ctypes.c_void_p]
         self.lib.meltype_set_direct.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.lib.meltype_set_can_delete.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.lib.meltype_set_can_delete.restype = None
         if self.lib.meltype_init_mozc(os.fsencode(mozc.resolve()), None) != 1:
             raise UnsafeEffect("Meltype Mozc could not initialize")
         self.session = self.lib.meltype_create()
         if not self.session:
             raise UnsafeEffect("Meltype native session unavailable")
         self.lib.meltype_set_direct(self.session, 0)
+        # The existing main API lets the Core avoid unsupported retroactive
+        # edits. Expect metadata alone is not proof of the child editor's text.
+        self.lib.meltype_set_can_delete(self.session, 0)
         self.proposal = None
         self.transport = None
         self.target = ""

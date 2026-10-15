@@ -33,9 +33,17 @@ _lib.meltype_commit.restype = ctypes.c_void_p
 _lib.meltype_select_candidate.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _lib.meltype_select_candidate.restype = ctypes.c_void_p
 _lib.meltype_set_direct.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_lib.meltype_set_can_delete.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _lib.meltype_free.argtypes = [ctypes.c_void_p]
 _lib.meltype_report_url.argtypes = [ctypes.c_char_p]
 _lib.meltype_report_url.restype = ctypes.c_void_p
+# 入力中の 変換・無変換・ひらがな/カタカナ キー (設定「入力中のキーの役割を分ける」: issue #199)。古い本体には無い
+_role_key = getattr(_lib, "meltype_role_key", None)
+if _role_key is not None:
+    _role_key.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _role_key.restype = ctypes.c_void_p
+
+ROLE_KEYS = {IBus.KEY_Henkan: 0x1C, IBus.KEY_Muhenkan: 0x1D, IBus.KEY_Hiragana_Katakana: 0x15}
 
 
 def _report_url():
@@ -79,18 +87,28 @@ SYMBOL_KEYS = {",": 0xBC, ".": 0xBE, "-": 0xBD, "/": 0xBF, "[": 0xDB, "]": 0xDD}
 
 
 def virtual_key(keyval):
-    """(仮想キーコード, 入力する文字) を返す。Meltype が扱わないキーなら (None, 0)。"""
+    """(仮想キーコード, 入力する文字) を返す。Meltype が扱わないキーなら (None, 0)。
+
+    英字の仮想キーへ写像するのは ASCII の A-Z / a-z だけにする。以前は character.lower() してから
+    ord() を呼んでいたため、トルコ語の İ (U+0130) のように小文字化で 1 文字でなくなる (i + 結合ドット)
+    文字で例外になっていた。非 ASCII は小文字化せず、元のコードポイントのまま他文字キーとして渡す。
+    """
     if keyval in SPECIAL_KEYS:
         return SPECIAL_KEYS[keyval], (0x20 if keyval == IBus.KEY_space else 0)
     character = IBus.keyval_to_unicode(keyval)
-    if not character or ord(character) < 0x20:
+    # 空・複数スカラーは ord() の前に弾く (先頭 1 文字へ黙って切り詰めない)。
+    if not character or len(character) != 1:
         return None, 0
-    lower = character.lower()
-    if "a" <= lower <= "z":
-        return ord(lower) - 0x20, ord(character)
+    codepoint = ord(character)
+    if codepoint < 0x20:
+        return None, 0
+    if "A" <= character <= "Z":
+        return codepoint, codepoint
+    if "a" <= character <= "z":
+        return codepoint - 0x20, codepoint
     if "0" <= character <= "9":
-        return ord(character), ord(character)
-    return SYMBOL_KEYS.get(character, OTHER_CHARACTER_KEY), ord(character)
+        return codepoint, codepoint
+    return SYMBOL_KEYS.get(character, OTHER_CHARACTER_KEY), codepoint
 
 
 # ---- 入力エンジン ----
@@ -118,6 +136,12 @@ class MeltypeEngine(IBus.Engine):
     def do_process_key_event(self, keyval, keycode, state):
         if state & IBus.ModifierType.RELEASE_MASK or not self._session:
             return False
+        # 入力中の 変換・無変換・ひらがな/カタカナ: 設定で役割を分けていれば、本体が変換ボックスで処理する (#199)
+        if keyval in ROLE_KEYS and _role_key is not None and not self._direct:
+            pointer = _role_key(self._session, ROLE_KEYS[keyval])
+            if pointer:
+                self._apply(_result(pointer))
+                return True
         # 半角/全角: 英数 (直接入力) ⇔ 日本語。英数・ひらがなのキーでも切り替える (JIS キーボード)。
         if keyval in (IBus.KEY_Zenkaku_Hankaku, IBus.KEY_Hankaku, IBus.KEY_Zenkaku, IBus.KEY_Eisu_toggle, IBus.KEY_Hiragana_Katakana, IBus.KEY_Muhenkan, IBus.KEY_Henkan):
             to_direct = keyval in (IBus.KEY_Eisu_toggle, IBus.KEY_Muhenkan) or (keyval in (IBus.KEY_Zenkaku_Hankaku, IBus.KEY_Hankaku, IBus.KEY_Zenkaku) and not self._direct)
@@ -151,6 +175,12 @@ class MeltypeEngine(IBus.Engine):
         # 別の入力欄・アプリに移るときは、未確定の内容をそのまま確定する。
         if self._session:
             self._apply(_result(_lib.meltype_commit(self._session)))
+
+    def do_set_capabilities(self, caps):
+        # 周りの文字 (surrounding text) に対応していない入力欄では、確定済みの文字を消せない。
+        # 消せないのに確定し直すと、元の文字が残ったまま書き足される (api → apiあぴ) ので、本体に確定し直しをやめさせる。
+        if self._session:
+            _lib.meltype_set_can_delete(self._session, 1 if caps & IBus.Capabilite.SURROUNDING_TEXT else 0)
 
     def do_focus_in(self):
         self.register_properties(self._properties)
@@ -305,7 +335,7 @@ def main():
         bus.request_name("org.freedesktop.IBus.Meltype", 0)
     else:
         # 手で起動したとき (試すとき): コンポーネントを登録する
-        component = IBus.Component.new("org.freedesktop.IBus.Meltype", "Meltype", "1.0.2", "GPL-3.0-or-later", "Yukishiro", "https://github.com/yksr-melt/Meltype", "", "")
+        component = IBus.Component.new("org.freedesktop.IBus.Meltype", "Meltype", "1.2.1", "GPL-3.0-or-later", "Yukishiro", "https://github.com/yksr-melt/Meltype", "", "")
         component.add_engine(IBus.EngineDesc.new("meltype", "Meltype", "Meltype", "ja", "GPL-3.0-or-later", "Yukishiro", "", "default"))
         bus.register_component(component)
     loop.run()

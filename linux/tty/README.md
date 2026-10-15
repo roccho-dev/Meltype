@@ -5,6 +5,21 @@ It has no Chrome/cdp-tty test dependency. Conversion remains the existing
 Meltype Core/NativeAOT/Mozc implementation. There is no SKK, Fcitx5, second
 ranker, daemon, or shadow terminal grid. Kitty images display candidates.
 
+## Adopted main compatibility
+
+The shared SessionResult encoder is the main encoder: one `notes` array,
+positioned by candidate count, and the existing optional `expect` on text edits.
+The TTY does not reinterpret `expect` as permission to erase child-owned text.
+It uses main's `meltype_set_can_delete(..., 0)` before input, retaining atomic
+rejection of any unsupported deletion that nevertheless reaches the boundary.
+A matching NativeAOT artifact is required; an older library without that API
+is not substituted. The original Proposal port and lifetime/cancel rules remain.
+
+The ordinary Linux artifact keeps main's IBus/fcitx5 products and all their
+existing tests. B's Nix output selects only NativeAOT, Mozc, TTY and notices
+from that artifact, so the Direct Input runtime does not acquire addon, IBus,
+Chrome or cdp-tty dependencies. The Shell/Editor VM still checks that absence.
+
 ## Reusable B package export
 
 `linux/tty/package.nix` is the sole B-owned Nix wrapper of an immutable,

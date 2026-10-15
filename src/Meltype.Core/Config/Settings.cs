@@ -39,6 +39,8 @@ public enum CompositionSize
     [Description("小")] Small,
     [Description("中")] Medium,
     [Description("大")] Large,
+    [Description("特大")] ExtraLarge,
+    [Description("最大")] Huge,
 }
 
 /// <summary>変換ボックスを出す位置。</summary>
@@ -47,6 +49,28 @@ public enum CompositionPlacement
     /// <summary>打っている行に重ねる (入力欄の中に打っているように見える)。</summary>
     [Description("入力位置に重ねる")] Overlay,
     [Description("カーソルの下")] BelowCaret,
+    /// <summary>入力位置の上に別の枠で出す (下の行や入力欄の下の部分を隠さない)。</summary>
+    [Description("カーソルの上")] AboveCaret,
+}
+
+/// <summary>変換ボックスの色。</summary>
+public enum CompositionTheme
+{
+    /// <summary>既定。黒っぽい背景に白い文字。</summary>
+    [Description("ダーク")] Dark,
+    /// <summary>白っぽい背景に黒い文字。</summary>
+    [Description("ライト")] Light,
+    /// <summary>Windows の「既定のアプリ モード」(ライト / ダーク) に合わせる。</summary>
+    [Description("Windows の設定に合わせる")] System,
+}
+
+/// <summary>変換ボックスの不透明度。</summary>
+public enum CompositionOpacity
+{
+    [Description("100% (透けない)")] Opaque,
+    [Description("90%")] Percent90,
+    [Description("80%")] Percent80,
+    [Description("70%")] Percent70,
 }
 
 /// <summary>かな漢字変換のエンジン。</summary>
@@ -59,12 +83,25 @@ public enum ConversionEngine
     [Description("Microsoft IME")] System,
 }
 
+/// <summary>句読点の組み合わせ (Microsoft IME と同じ 4 通り)。, と . を打ったときに出す文字。</summary>
+public enum PunctuationStyle
+{
+    /// <summary>既定。</summary>
+    [Description("、。")] Japanese,
+    /// <summary>論文などで使う全角のカンマとピリオド。</summary>
+    [Description("，．")] FullWidthCommaPeriod,
+    [Description("，。")] FullWidthCommaKuten,
+    [Description("、．")] ToutenFullWidthPeriod,
+}
+
 public enum InputMode
 {
     /// <summary>Meltype 自身の変換ボックスで入力する (半角/全角 不要)。</summary>
     [Description("Meltype キーボード (変換ボックスで入力)")] Keyboard,
     /// <summary>入力開始時に判定して Microsoft IME の ON/OFF を切り替える (v1 の動作)。</summary>
     [Description("IME 自動切替 (Microsoft IME を使う)")] AutoSwitch,
+    /// <summary>Windows の IME (TSF) として、入力欄に直接入力する。キーボードフックは使わない。</summary>
+    [Description("Meltype IME (入力欄に直接入力)")] Tsf,
 }
 
 [TypeConverter(typeof(ExpandableObjectConverter))]
@@ -132,13 +169,10 @@ public enum AppProfile
 /// </summary>
 public sealed class Settings
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true,
-    };
+    // 型の情報はビルド時に作ったもの (SettingsJsonContext)。Mac・Linux の NativeAOT でも読める (issue #151)。
+    // 字下げ・コメントと末尾の , を許す・列挙型は名前で読み書き は SettingsJsonContext の属性で指定している。
+    private static JsonSerializerOptions JsonOptions => SettingsJsonContext.Default.Options;
+    private static System.Text.Json.Serialization.Metadata.JsonTypeInfo<Settings> JsonType => SettingsJsonContext.Default.Settings;
 
     [Category("1. 全般"), DisplayName("Meltype を有効にする")]
     public bool Enabled { get; set; } = true;
@@ -147,13 +181,25 @@ public sealed class Settings
      Description("Windows の入力言語が日本語のときだけ動作します。韓国語・英語などでは入力処理と IME の自動制御を停止し、日本語に戻すと再開します。物理キーボードの JIS / US 配列や IME の「あ」「A」の状態は問いません。全プロファイル共通です。")]
     public bool JapaneseKeyboardOnly { get; set; }
 
+    [Category("1. 全般"), DisplayName("遠隔操作などの入力も処理する"),
+     Description("AnyDesk・VNC などの遠隔操作ソフトや、ULE4JIS などキー配列を変えるソフト (JIS キーボードを US 配列で使う) から届いたキーも、手で打ったキーと同じように処理します (OFF だと、ほかのソフトが送ったキーはそのままアプリに渡し、変換ボックスを開きません。キー配列を変えるソフトは Meltype より後に起動してください)。遠隔操作ソフトとキーボードのマクロ・自動入力のソフトは見分けられないので、ON にするとどちらも処理の対象になります。Meltype 自身が送ったキーは、ON でも処理しません。Chrome リモート デスクトップ・Parsec で操作されている間は、OFF でも処理します (Parsec は、接続していなくても Parsec が動いている間はずっと処理するので、AutoHotkey などが送ったキーも変換の対象になります)。全プロファイル共通です。")]
+    public bool AllowInjectedInput { get; set; }
+
     [Category("1. 全般"), DisplayName("動作モード"),
-     Description("Keyboard = Meltype の変換ボックスで入力 (英単語は自動で英字、Space で変換、Enter で確定) / AutoSwitch = 入力開始時に判定して Microsoft IME を自動で ON にする")]
-    public InputMode Mode { get; set; } = InputMode.Keyboard;
+     Description("Tsf = Windows の IME として入力欄に直接入力 (Win + Space で Meltype を選ぶ) / Keyboard = Meltype の変換ボックスで入力 (英単語は自動で英字、Space で変換、Enter で確定) / AutoSwitch = 入力開始時に判定して Microsoft IME を自動で ON にする")]
+    public InputMode Mode { get; set; } = InputMode.Tsf;
 
     [Category("1. 全般"), DisplayName("半角/全角 で Meltype を ON/OFF"),
      Description("Keyboard モードで、変換ボックスが出ていないときの 半角/全角 キーを Meltype キーボードの ON/OFF (直接入力) に使います。")]
     public bool HankakuTogglesKeyboard { get; set; } = true;
+
+    [Category("1. 全般"), DisplayName("無変換で英数 / 変換で日本語"),
+     Description("Keyboard モードで、変換ボックスが出ていないときの 無変換 キーで英数 (直接入力) に、変換 キーで日本語入力にします (Mac の 英数 / かな キーと同じく、押す前のモードによらず決まったモードになります)。もう日本語入力のときの 変換 キーは今までどおり選択した文字の再変換です。変換ボックスが出ている間の 無変換・変換 は今までどおりで、切り替えません。「コード」のアプリのコードの行では、変換 キーでその行を日本語にします (半角/全角 と同じ)。")]
+    public bool ConvertKeysSwitchKeyboard { get; set; }
+
+    [Category("1. 全般"), DisplayName("左 Alt で英数 / 右 Alt で日本語"),
+     Description("Keyboard モードで、左 Alt の単独押しで英数 (直接入力) に、右 Alt の単独押しで日本語入力にします (半角/全角 キーの無い US 配列向け)。Alt + Tab などの組み合わせや Alt + クリックでは切り替えません。単独押しでアプリのメニューバーに移らなくなります。変換ボックスが出ている間は切り替えません。「コード」のアプリのコードの行では、右 Alt でその行を日本語にします (半角/全角 と同じ)。")]
+    public bool AltKeysSwitchKeyboard { get; set; }
 
     [Category("1. 全般"), DisplayName("確定後も文脈に合わせて直す"),
      Description("英語とも日本語とも読める語 (i, sushi など) を確定した後、次の語で英語か日本語かがはっきりしたら自動で確定し直します (i → 胃 と確定した後に want と打つと I want)。")]
@@ -163,9 +209,25 @@ public sealed class Settings
      Description("Keyboard モードの英数 (直接入力) 状態でも単語の打ち始めを判定し、ローマ字 (日本語) なら自動で日本語入力に戻します。")]
     public bool DirectModeAutoDetect { get; set; } = true;
 
+    [Category("1. 全般"), DisplayName("/ $ @ で始まる語はそのまま入力"),
+     Description("Keyboard モードで、入力欄・行の先頭か空白の直後に打った / $ @ と、続く名前 (空白まで) は変換せず、打つたびにそのままアプリに渡します (AI エージェントの /command・$skill・@ファイル名 の補完を選びやすく)。名前の後に空白を打つと、普通の自動判定に戻ります。")]
+    public bool SigilWordsDirect { get; set; } = true;
+
+    [Category("1. 全般"), DisplayName("定型文を出す記号"),
+     Description("Keyboard モードで、入力欄・行の先頭か空白の直後にこの記号と名前を打って Space / Tab を押すと、トレイの「定型文...」で登録した文に置き換えます (;sig + Space → 署名)。名前が登録したものでなければ何もしません。置き換えた直後に Esc を押すと、打った ;名前 に戻します。空にすると使いません。定型文を 1 つも登録していなければ、記号は今までどおり入力します。")]
+    public string SnippetMark { get; set; } = ";";
+
     [Category("1. 全般"), DisplayName("英単語の前後に半角スペース"),
      Description("確定するときに、日本語と英単語の間に半角スペースを入れます (今日はGitHubにpushした → 今日は GitHub に push した)。数字だけの語 (3時) には入れません。")]
     public bool SpaceAroundEnglish { get; set; }
+
+    [Category("1. 全般"), DisplayName("句読点"),
+     Description("日本語の中で , と . を打ったときに出す句読点です (Microsoft IME と同じ 4 通り)。論文などで「，．」「，。」「、．」を使うときに変えます。かな入力の 、 。 のキーにも効きます。数字の間の . , (1.5、1,000) や英単語の中の . (tetr.io) は半角のままです。")]
+    public PunctuationStyle Punctuation { get; set; } = PunctuationStyle.Japanese;
+
+    [Category("1. 全般"), DisplayName("英字の後ろの , . も句読点にする"),
+     Description("英字のすぐ後ろで打った , . も、日本語の句読点 (設定「句読点」の形) にします (IME, → IME、)。OFF だと、変換ボックスの中が英字だけなら半角の , . のままです (英文を打つとき)。ON でも、キャレットの前が英語 (Hello + world.) のときと、英単語の中の . (tetr.io) は半角のままです。")]
+    public bool JapanesePunctuationAfterEnglish { get; set; }
 
     [Category("1. 全般"), DisplayName("ライブ変換"),
      Description("Keyboard モードで、Space を押さなくても打ったそばから漢字に変換して表示します。")]
@@ -179,13 +241,37 @@ public sealed class Settings
      Description("変換の候補の後ろに英訳も出します (複雑な → complex, complicated)。JMdict のよく使う語から。選んだ英訳は少しずつ前に出ます。")]
     public bool TranslationCandidates { get; set; } = true;
 
+    [Category("1. 全般"), DisplayName("予測変換の候補"),
+     Description("打っている途中に、続きの候補を変換ボックスの下に出します (前に確定した語句・ユーザー辞書・選び直した変換の学習・英単語の続き)。Tab / Shift+Tab で選んで Enter で確定します。確定した語句は %LOCALAPPDATA%\\Meltype\\phrases.txt (Mac・Linux は設定と同じフォルダー) に暗号化せずに覚え (この PC の外には送りません)、「学習データをリセット」で消えます。")]
+    public bool PredictiveCandidates { get; set; } = true;
+
+    [Category("1. 全般"), DisplayName("Tab で変換"),
+     Description("打っている途中に Tab を押すと、Space と同じく変換を始めます (Microsoft IME と同じ)。Tab で始めた変換の中では Tab で次の候補、Shift+Tab で前の候補、Enter で確定します。もしかして・手動の提案・予測変換の候補が出ているときは、今までどおりそちらに使います。英語で終わっているとき・Space で始めた変換の中では、今までどおり確定してから Tab をアプリに渡します。")]
+    public bool TabConversion { get; set; } = true;
+
+    [Category("1. 全般"), DisplayName("変換したあとに続けて打っても確定しない"),
+     Description("Space で変換したあとに続けて文字を打っても、変換した部分を確定せず、続けて打った文字と一緒に変換ボックスに残します (選んだ候補は、もう一度変換したときにも使います)。OFF なら Microsoft IME と同じく、変換した部分を確定してから続きを打ちます。")]
+    public bool ContinueAfterConversion { get; set; }
+
+    [Category("1. 全般"), DisplayName("入力中のキーの役割を分ける"),
+     Description("入力中 (変換ボックスに文字があるとき) の Space・変換・無変換・ひらがな/カタカナ キーの役割を分けます。Space: 英語・日本語の判定にかかわらず候補を開く (英字で見えている語も、確定して空白を入れずに候補を出す)。変換: 日本語を優先して変換。無変換: 英字にする。ひらがな/カタカナ: ひらがな ⇔ カタカナ。確定は Enter です。何も打っていないときの各キーは今までどおりです。")]
+    public bool SeparateKeyRoles { get; set; }
+
     [Category("1. 全般"), DisplayName("候補の意味を表示"),
      Description("変換中に同じ候補で少し (約 1.5 秒) 止まると、その候補の意味をウィクショナリー日本語版から候補の一覧の横に出します (日本語の意味が無い語は JMdict の英訳: 橋 → bridge)。同音異義語を選ぶときの手がかりに。")]
     public bool ShowCandidateMeanings { get; set; } = true;
 
+    [Category("1. 全般"), DisplayName("打ったキーを表示"),
+     Description("変換ボックスの文字の下に、打ったキー (ローマ字: kyouhagoogle) を小さく出します。打ち間違いに気づきやすくなります。Meltype キーボード (変換ボックス) のときだけ。")]
+    public bool ShowTypedKeys { get; set; } = true;
+
     [Category("1. 全般"), DisplayName("打ち間違いを直す"),
      Description("Space・Enter で変換・確定するときに打ち間違いを直します。ローマ字: 読めない子音が残ったとき、隣のキーの押し間違い・入れ替わり・抜けを 1 文字だけ直します (onegaishimsu → お願いします、sumimasne → すみません。よく使う語の読みになるときだけ)。英語: Windows の自動修正の一覧にある打ち間違いを直します (teh → the、recieve → receive)。")]
     public bool CorrectTypos { get; set; } = true;
+
+    [Category("1. 全般"), DisplayName("/ キーで中黒「・」"),
+     Description("かなのすぐ後ろで打った / を中黒「・」にします (いーろん/ますく → イーロン・マスク)。英字・数字の後ろ (and/or、3/4、URL) と、打ち始めの / (/help) は / のままです。OFF のときも、z/ または / を打って Space で「・」にできます。")]
+    public bool SlashAsMiddleDot { get; set; }
 
     [Category("1. 全般"), DisplayName("入力モードをカーソルの近くに表示"),
      Description("入力欄をクリックしたときと 半角/全角 を押したときに、カーソルの近くに「あ」(日本語) か「A」(英数) を一瞬表示します。Meltype キーボードの使用中は Windows の IME を OFF にしているので、タスクバーの IME の表示は常に「A」になります。今のモードはこの表示かトレイの Meltype のアイコンで確認してください。")]
@@ -195,13 +281,55 @@ public sealed class Settings
      Description("「入力モードをカーソルの近くに表示」が ON のとき、入力欄をクリックしたとき (フォーカスが入ったとき) にも「あ」「A」を出します。OFF にすると、半角/全角 を押したときだけ出します。")]
     public bool ShowModeIndicatorOnFocus { get; set; } = true;
 
+    [Category("1. 全般"), DisplayName("入力モードの表示の色: 日本語 (あ)"),
+     Description("「あ」の背景色を #RRGGBB で書きます (例: #007ACC)。空なら青。壁紙・アプリのテーマで見えにくいときに変えます。")]
+    public string ModeIndicatorJapaneseColor { get; set; } = "";
+
+    [Category("1. 全般"), DisplayName("入力モードの表示の色: 英数 (A)"),
+     Description("「A」の背景色を #RRGGBB で書きます (例: #D32F2F で赤)。空なら灰色。英数になっているのに気づかずに打ち始めてしまうときは、目立つ色にします。")]
+    public string ModeIndicatorDirectColor { get; set; } = "";
+
+    [Category("1. 全般"), DisplayName("入力モードの表示の色: 文字"),
+     Description("「あ」「A」の文字の色を #RRGGBB で書きます (例: #000000)。空なら白。")]
+    public string ModeIndicatorTextColor { get; set; } = "";
+
     [Category("1. 全般"), DisplayName("変換ボックスの位置"),
-     Description("入力位置に重ねる: 打っている文字が入力欄の中の入力位置にそのまま出ているように見えます。カーソルの下: 入力位置の下に別の枠で出します (今までの出し方)。入力位置が分からないアプリでは、どちらも入力欄の下に出します。")]
+     Description("入力位置に重ねる: 打っている文字が入力欄の中の入力位置にそのまま出ているように見えます。カーソルの下: 入力位置の下に別の枠で出します (今までの出し方)。カーソルの上: 入力位置の上に別の枠で出します (候補の一覧が入力欄や下の行を隠さない)。入力位置が分からないアプリでは、どれも入力欄の下に出します。")]
     public CompositionPlacement CompositionPlacement { get; set; } = CompositionPlacement.Overlay;
 
     [Category("1. 全般"), DisplayName("変換ボックスの文字の大きさ"),
-     Description("自動: 入力欄の文字の高さに合わせます (小さな入力欄では小さく出ます)。入力欄の文字の高さが分からないアプリでは「中」になります。")]
+     Description("自動: 入力欄の文字の高さに合わせます (小さな入力欄では小さく出ます)。入力欄の文字の高さが分からないアプリでは「中」になります。小さな文字が読みにくいときは「特大」「最大」も選べます。")]
     public CompositionSize CompositionSize { get; set; } = CompositionSize.Auto;
+
+    [Category("1. 全般"), DisplayName("変換ボックスのフォント"),
+     Description("変換ボックスの文字のフォントです。既定は Yu Gothic UI です。この PC に無いフォントを選んでいたときは既定のフォントで出します。絵文字はカラーで出せるときはそのフォントで描きます。")]
+    public string CompositionFont { get; set; } = "";
+
+    [Category("1. 全般"), DisplayName("変換ボックスの色"),
+     Description("ダーク: 黒っぽい背景に白い文字 (今までの見た目)。ライト: 白っぽい背景に黒い文字。Windows の設定に合わせる: Windows の「既定のアプリ モード」(設定の 個人用設定 > 色) に合わせます。")]
+    public CompositionTheme CompositionTheme { get; set; } = CompositionTheme.Dark;
+
+    [Category("1. 全般"), DisplayName("変換ボックスの不透明度"),
+     Description("変換ボックスを少し透かして、後ろの文字を見えるようにします。100% は透けません。")]
+    public CompositionOpacity CompositionOpacity { get; set; } = CompositionOpacity.Opaque;
+
+    /// <summary>変換ボックスをライトの色で出すか。windowsLight は Windows のアプリ モードがライトか (分からなければ null = ダーク)。</summary>
+    public bool CompositionIsLight(bool? windowsLight) => CompositionTheme switch
+    {
+        CompositionTheme.Light => true,
+        CompositionTheme.System => windowsLight ?? false,
+        _ => false,
+    };
+
+    /// <summary>変換ボックスの不透明度 (0.7〜1)。</summary>
+    [Browsable(false), JsonIgnore]
+    public double CompositionOpacityValue => CompositionOpacity switch
+    {
+        CompositionOpacity.Percent90 => 0.9,
+        CompositionOpacity.Percent80 => 0.8,
+        CompositionOpacity.Percent70 => 0.7,
+        _ => 1.0,
+    };
 
     [Category("1. 全般"), DisplayName("通知を出す"),
      Description("Meltype を有効・一時停止にしたときなどに、画面の右下に通知を出します (Windows の通知の音も鳴ります)。OFF にすると通知も音も出しません。")]
@@ -217,6 +345,10 @@ public sealed class Settings
     [Category("2. 判定"), DisplayName("自動判定の強さ"),
      Description("積極的 = 英語らしければすぐ英字 / 標準 = 短い語 (no, to, ga) は前後が英語のときだけ英字 / 慎重 = 確信度が高いときだけ英字 / 手動 = 自動では切り替えず提案だけ (変換ボックスで Tab を押すと提案どおり英字に)。Meltype キーボード・IME 自動切替・英数状態の検知・かな入力のすべてに効きます。")]
     public DetectionLevel DetectionLevel { get; set; } = DetectionLevel.Balanced;
+
+    [Category("2. 判定"), DisplayName("区切りを点数で選ぶ (α版)"),
+     Description("変換ボックスの中で英語と日本語をどこで区切るかを、あり得る区切り方を全部比べて一番自然なもので決めます (α版: 試験中)。英単語の後ろの「は」(medalsha → medalsは、presidentha → presidentは) などが正しく分かれやすくなります。OFF なら今までどおり、先頭から順に決めます。")]
+    public bool ScoredSegmentation { get; set; }
 
     /// <summary>判定の強さを反映した日本語判定の閾値 (IME 自動切替・英数状態の検知)。</summary>
     [Browsable(false), JsonIgnore]
@@ -250,6 +382,18 @@ public sealed class Settings
     [Browsable(false)]
     public bool WelcomeShown { get; set; }
 
+    /// <summary>
+    /// Meltype IME (TSF) が入っているのを見つけて、動作モードを Meltype IME にしたか (一度だけ切り替える。後でユーザーが戻したら、そのまま)。
+    /// </summary>
+    [Browsable(false)]
+    public bool TsfIntroduced { get; set; }
+
+    /// <summary>
+    /// Meltype IME を入れるかを聞いたか (Meltype IME が入る前の版から更新した人に、起動したときに一度だけ聞く)。
+    /// </summary>
+    [Browsable(false)]
+    public bool TsfOffered { get; set; }
+
     /// <summary>プロファイル (仕事用・趣味用・SNS 用など)。設定画面の上と、トレイのメニューで切り替える。</summary>
     [Browsable(false)]
     public List<SettingsProfile> Profiles { get; set; } = [];
@@ -266,13 +410,15 @@ public sealed class Settings
     private static readonly HashSet<string> SharedKeys =
     [
         nameof(Profiles), nameof(ActiveProfile), nameof(SettingsVersion), nameof(WelcomeShown),
-        nameof(Enabled), nameof(JapaneseKeyboardOnly), nameof(FileLog), nameof(LogTypedText), nameof(AutoUpdate),
+        nameof(Enabled), nameof(JapaneseKeyboardOnly), nameof(AllowInjectedInput), nameof(FileLog), nameof(LogTypedText), nameof(AutoUpdate),
+        // 入力の方式 (Windows の IME として入力するか) は PC 全体の選び方なので、プロファイルで変えない
+        nameof(Mode), nameof(TsfIntroduced), nameof(TsfOffered),
     ];
 
     /// <summary>今の設定の値のうち、プロファイルに入れるもの。</summary>
     public JsonObject ProfileValues()
     {
-        var values = JsonSerializer.SerializeToNode(this, JsonOptions)!.AsObject();
+        var values = JsonSerializer.SerializeToNode(this, JsonType)!.AsObject();
         foreach (var key in SharedKeys) values.Remove(key);
         return values;
     }
@@ -290,9 +436,13 @@ public sealed class Settings
         if (name == current.ActiveProfile || current.Profiles.FirstOrDefault(p => p.Name == name) is not { } target) return current;
         current.Profiles.First(p => p.Name == current.ActiveProfile).Values = current.ProfileValues();
         // 共通の項目は今の値のまま、プロファイルの項目だけを切り替え先の値にする
-        var merged = JsonSerializer.SerializeToNode(current, JsonOptions)!.AsObject();
-        foreach (var (key, value) in target.Values ?? []) merged[key] = value?.DeepClone();
-        var next = merged.Deserialize<Settings>(JsonOptions) ?? current;
+        var merged = JsonSerializer.SerializeToNode(current, JsonType)!.AsObject();
+        // 前の版で保存したプロファイルには、今は共通にした項目 (動作モードなど) が入っていることがあるので飛ばす
+        foreach (var (key, value) in target.Values ?? [])
+        {
+            if (!SharedKeys.Contains(key)) merged[key] = value?.DeepClone();
+        }
+        var next = merged.Deserialize(JsonType) ?? current;
         next.ActiveProfile = name;
         return next.Normalize();
     }
@@ -363,12 +513,12 @@ public sealed class Settings
                 file["format"]?.GetValue<string>() != ProfileFileFormat || file["values"] is not JsonObject raw) return null;
             name = (file["name"]?.GetValue<string>() ?? "").Trim();
             // 既定の設定に、知っている項目だけを重ねてから読み直す (型の違う値はここで例外になる)
-            var merged = JsonSerializer.SerializeToNode(new Settings().Normalize(), JsonOptions)!.AsObject();
+            var merged = JsonSerializer.SerializeToNode(new Settings().Normalize(), JsonType)!.AsObject();
             foreach (var (key, value) in raw)
             {
                 if (merged.ContainsKey(key) && !SharedKeys.Contains(key)) merged[key] = value?.DeepClone();
             }
-            values = (merged.Deserialize<Settings>(JsonOptions) ?? new Settings()).Normalize().ProfileValues();
+            values = (merged.Deserialize(JsonType) ?? new Settings()).Normalize().ProfileValues();
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException or NotSupportedException)
         {
@@ -392,7 +542,8 @@ public sealed class Settings
     [Category("4. セッション"), DisplayName("英語の後の Space では判定しない"), Description("英語と判定した直後に Space で区切られた次の単語は、保留せずそのまま通します (英文入力中の遅延を減らします)。")]
     public bool ContinueEnglishAfterSpace { get; set; }
 
-    [Category("5. 学習"), DisplayName("ユーザー学習を使う")]
+    [Category("5. 学習"), DisplayName("ユーザー学習を使う"),
+     Description("OFF にすると、自動切替の学習 (model.json) を使わず、選び直した変換・英字 / かなに直した語・予測変換の語句・選んだ英訳も新しく覚えません (今まで覚えた分は使います)。今まで覚えた分を消すときは、トレイの「学習データを消す」を使います。")]
     public bool LearningEnabled { get; set; } = true;
 
     [Category("5. 学習"), DisplayName("誤判定フィードバックの受付時間 (ms)"), Description("自動判定の後、この時間内に 半角/全角 などの IME 切替キーが押されたら誤判定として学習します。")]
@@ -405,13 +556,54 @@ public sealed class Settings
     public int ImeTimeoutMs { get; set; } = 300;
 
     [Category("7. アプリ"), DisplayName("貼り付けで入力するアプリ"),
-     Description("確定した文字を 1 文字ずつ送ると取り違えるアプリ (DaVinci Resolve で「あいうえお」→「あああああ」)。ここに書いたアプリ (プロセス名、カンマ区切り) では、クリップボードを使って貼り付けで入れます (元のクリップボードの中身は戻します)。")]
+     Description("確定した文字を 1 文字ずつ送ると取り違えるアプリ (DaVinci Resolve で「あいうえお」→「あああああ」)。ここに書いたアプリ (プロセス名、カンマ区切り) では、クリップボードを使って貼り付けで入れます (元のクリップボードの中身は戻します)。Qt アプリはここに書かなくても自動で貼り付けになります。")]
     public string PasteApps { get; set; } = "Resolve.exe";
 
+    [Category("7. アプリ"), DisplayName("貼り付けを使わないアプリ"),
+     Description("Qt アプリ (LINE・OBS など) では、確定した文字をクリップボード経由 (貼り付け) で入れます。1 文字ずつキーとして送ると、keyup がアプリに届かない環境で最初の 1 文字が繰り返されるためです。ここに書いたアプリ (プロセス名、カンマ区切り) では貼り付けを使わず、これまでどおり 1 文字ずつ送ります (Ctrl+V が貼り付けではないアプリなど)。")]
+    public string NoPasteApps { get; set; } = "";
+
     /// <summary>このアプリでは確定した文字を貼り付けで入れるか (<see cref="PasteApps"/>)。</summary>
-    public bool UsesPaste(string? processName) =>
-        !string.IsNullOrEmpty(processName) &&
-        (PasteApps ?? "").Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries).Any(app => string.Equals(app.Trim(), processName, StringComparison.OrdinalIgnoreCase));
+    public bool UsesPaste(string? processName) => ContainsApp(PasteApps, processName);
+
+    /// <summary>このアプリでは貼り付けを使わないか (<see cref="NoPasteApps"/>)。</summary>
+    public bool UsesNoPaste(string? processName) => ContainsApp(NoPasteApps, processName);
+
+    [Category("7. アプリ"), DisplayName("入力欄とみなすアプリ"),
+     Description("画面を自分で描くため、文字を打つ所なのに入力欄と判定されず変換ボックスが出ないアプリ (Premiere Pro など)。ここに書いたアプリ (プロセス名、カンマ区切り。例: Adobe Premiere Pro.exe) では、入力欄と判定できなくても、フォーカスのある所を入力欄として扱います。1 文字のショートカット (V・C など) も変換ボックスに入るようになるので、ショートカットを使うときは Ctrl + 半角/全角 で一時停止してください。")]
+    public string TextInputApps { get; set; } = "";
+
+    /// <summary>このアプリでは、入力欄と判定できなくてもフォーカスのある所を入力欄として扱うか (<see cref="TextInputApps"/>)。</summary>
+    public bool TreatsAsTextInput(string? processName) => ContainsApp(TextInputApps, processName);
+
+    /// <summary>
+    /// #RRGGBB (# は無くてもよい・#RGB も可) の色を (赤, 緑, 青) にする。空・読めない値なら null (既定の色を使う: issue #359)。
+    /// </summary>
+    public static (int R, int G, int B)? ParseColor(string? text)
+    {
+        var hex = (text ?? "").Trim().TrimStart('#');
+        if (hex.Length == 3) hex = string.Concat(hex.Select(c => $"{c}{c}"));
+        if (hex.Length != 6 || !int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var value)) return null;
+        return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
+    }
+
+    /// <summary>
+    /// カンマ・セミコロン区切りのプロセス名の一覧に processName があるか (大文字小文字は無視)。
+    /// 「Adobe Premiere Pro.exe」のように空白を含む名前はそのまま 1 つの名前として比べる。
+    /// 前からの書き方 (空白区切り「a.exe b.exe」) は、空白で分けたものがすべて .exe で終わるときだけ 1 つずつと比べる。
+    /// </summary>
+    private static bool ContainsApp(string? list, string? processName)
+    {
+        if (string.IsNullOrEmpty(processName)) return false;
+        foreach (var entry in (list ?? "").Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.Equals(entry, processName, StringComparison.OrdinalIgnoreCase)) return true;
+            var apps = entry.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (apps.Length > 1 && apps.All(app => app.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) &&
+                apps.Any(app => string.Equals(app, processName, StringComparison.OrdinalIgnoreCase))) return true;
+        }
+        return false;
+    }
 
     [Category("7. アプリ"), DisplayName("全画面アプリでは無効"), Description("ゲームや動画など全画面のウィンドウではキーを保留しません。")]
     public bool ExcludeFullscreen { get; set; } = true;
@@ -521,6 +713,9 @@ public sealed class Settings
         ActiveProfile = ActiveProfile.Trim();
         if (Profiles.All(p => p.Name != ActiveProfile)) Profiles.Insert(0, new SettingsProfile { Name = ActiveProfile });
         foreach (var rule in AppRules) rule.Process = rule.Process.Trim();
+        // 同じアプリの設定が 2 つ以上あれば、後ろ (あとから足した方) を使う。既定の一覧にある Code.exe (コード) の後ろに
+        // Enabled: false の Code.exe を足しても、前の方が使われて OFF にならなかった (issue #233)
+        AppRules = AppRules.Where((rule, i) => !AppRules.Skip(i + 1).Any(later => string.Equals(later.Process, rule.Process, StringComparison.OrdinalIgnoreCase))).ToList();
         return this;
     }
 
@@ -535,7 +730,7 @@ public sealed class Settings
             if (MaxHoldMs == 1200) MaxHoldMs = 2500;
         }
         // v3: Meltype キーボード (変換ボックス) を追加。v2 以前の config.json には Mode が無いので、
-        // 読み込み時に初期値 (Keyboard) になる。
+        // 読み込み時に初期値になる。
         if (SettingsVersion < 4)
         {
             // v4: アプリの種類 (コード) を追加。コードエディター・ターミナルを「コード」にする (ユーザーが OFF にしたものはそのまま)。
@@ -561,7 +756,7 @@ public sealed class Settings
         {
             if (!File.Exists(path)) return new Settings();
             var json = File.ReadAllText(path);
-            var settings = JsonSerializer.Deserialize<Settings>(json, JsonOptions) ?? new Settings();
+            var settings = JsonSerializer.Deserialize(json, JsonType) ?? new Settings();
             if (!json.Contains(nameof(SettingsVersion))) settings.SettingsVersion = 1;
             if (settings.Migrate()) settings.Save(path);
             return settings.Normalize();
@@ -576,13 +771,13 @@ public sealed class Settings
     }
 
     /// <summary>config.json と同じ形式の文字列 (変更があったかを比べるのに使う)。</summary>
-    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
+    public string ToJson() => JsonSerializer.Serialize(this, JsonType);
 
     public void Save(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions));
+        File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonType));
         File.Move(temp, path, overwrite: true);
     }
 }

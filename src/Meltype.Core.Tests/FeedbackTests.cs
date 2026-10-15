@@ -45,6 +45,175 @@ internal static class FeedbackTests
     }
 
     [Test]
+    public static void Issue65_JapaneseWord_NotSplitByProperNounPrefix()
+    {
+        // Issue #65: anata を打っている途中で あnata (nata が固有名詞 Natalie の始まり) になっていた。
+        // 日本語のすぐ後ろの区間は、固有名詞の始まりというだけでは英字にしない
+        Assert.Equal("あなた", Showing("anata"));
+        Assert.Equal("きょうはなた", Showing("kyouhanata"));
+        // 入力の先頭の固有名詞の打ちかけ・大文字の名前は今までどおり英字
+        Assert.Equal("Nata", Showing("Nata"));
+    }
+
+    [Test]
+    public static void Issue303_ArtistNames_StayEnglish()
+    {
+        // Issue #303: 大文字の語 + 日本語 (K|はぃふぁ、She|えらん、Gran|で) に区切られていた名前と、記号を混ぜて書く名前
+        foreach (var (typed, expected) in new[]
+        {
+            ("Wiz Khalifa", "Wiz Khalifa"), ("Ariana Grande", "Ariana Grande"), ("Ed Sheeran", "Ed Sheeran"),
+            ("Marshmello", "Marshmello"), ("beabadoobee", "beabadoobee"), ("The Chainsmokers", "The Chainsmokers"),
+            ("iann dior", "iann dior"), ("999dobby", "999dobby"),
+            ("B.o.B", "B.o.B"), ("U.S.A.", "U.S.A."), ("Chri$tian Gate$", "Chri$tian Gate$"), ("Ke$ha", "Ke$ha"),
+            // 大文字の語 + 助詞は今までどおり区切る
+            ("Anisiyouka", "Aにしようか"), ("Tokyonisumu", "Tokyoにすむ"),
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+    }
+
+    [Test]
+    public static void Issue369_Huihui_StaysEnglish()
+    {
+        // Issue #369: huihui (AI のモデルを出している huihui-ai) が ふいふい (→ 回回) になっていた。ふいふい は日本語の語ではない
+        foreach (var (typed, expected) in new[] { ("huihui", "huihui"), ("huihuino", "huihuiの"), ("fuifui", "ふいふい") })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+    }
+
+    [Test]
+    public static void Issue377_EnglishCompound_StaysEnglish()
+    {
+        // Issue #377: gameover が がめover になっていた (game は がめ と読める)。英単語 2 つの合成語で、後ろの語 (over) が
+        // ローマ字として最後まで読めないなら、前の語も英語。よく使う日本語の語 (sake・made) の後ろは今までどおり
+        foreach (var (typed, expected) in new[]
+        {
+            ("gameover", "gameover"), ("gameoverninaru", "gameoverになる"),
+            ("sakeover", "さけover"), ("madeover", "までover"), ("shabushabu", "しゃぶしゃぶ"), ("commitshitai", "commitしたい"),
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+    }
+
+    [Test]
+    public static void Issue351_CapitalLetterThenJapaneseWord_IsSplit()
+    {
+        // Issue #351: やばいTシャツ屋さん (yabaiTshatuyasann) が やばいTshatuyasann になっていた。
+        // 大文字の子音 1 文字 + よく使う日本語の語 (しゃつ) で、合わせると頭から読めない (tsh) なら、大文字 1 文字 + 日本語
+        foreach (var (typed, expected) in new[]
+        {
+            ("yabaiTshatuyasann", "やばいTしゃつやさん"), ("yabaiTshatsuyasan", "やばいTしゃつやさん"), ("Tshatsuwokau", "Tしゃつをかう"),
+            // 名前・英単語は今までどおり
+            ("Tanaka", "Tanaka"), ("Grape", "Grape"), ("Spike", "Spike"), ("Krita", "Krita"), ("Snake", "Snake"),
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+    }
+
+    [Test]
+    public static void Issue376_SuruAfterEnglishAndParticle_IsJapanese()
+    {
+        // Issue #376: 英単語 + 助詞 + する の活用 (password|ni|site) を、英単語 + 助詞 + 英単語 (api|no|error) と見て site を英字にしていた
+        CompositionTests.Detector.SpellChecker = Detection.BuiltInWordChecker.Shared;
+        try
+        {
+            foreach (var (typed, expected) in new[]
+            {
+                ("passwordnisite", "passwordにして"), ("passwordwosite", "passwordをして"), ("passwordnisitekudasai", "passwordにしてください"),
+                ("emailwositai", "emailをしたい"),
+                // 英単語 + 助詞 + 英単語 は今までどおり
+                ("apinoerror", "apiのerror"), ("websitewomiru", "websiteをみる"),
+            })
+            {
+                var k = new CompositionTests.Keyboard();
+                k.Type(typed + "\n");
+                Assert.Equal(expected, k.Host.Document, typed);
+            }
+        }
+        finally
+        {
+            CompositionTests.Detector.SpellChecker = null;
+        }
+    }
+
+    [Test]
+    public static void Issue379_CSpelledEnglishWordThenParticle_StaysEnglish()
+    {
+        // Issue #379: face の後に日本語 (face + ni) が ふぁせに (ファ背に) になっていた。c で綴った英単語 + 助詞 は英単語 + 助詞。
+        // 日本語の途中の c 行の綴り (fucarete・shoucanshi) は今までどおり日本語
+        CompositionTests.Detector.SpellChecker = Detection.BuiltInWordChecker.Shared;
+        try
+        {
+            foreach (var (typed, expected) in new[]
+            {
+                ("faceni", "faceに"), ("facewo", "faceを"), ("faceniutsu", "faceにうつ"), ("placega", "placeが"),
+                ("fucarete", "ふかれて"), ("shoucanshi", "しょうかんし"),
+            })
+            {
+                var k = new CompositionTests.Keyboard();
+                k.Type(typed + "\n");
+                Assert.Equal(expected, k.Host.Document, typed);
+            }
+        }
+        finally
+        {
+            CompositionTests.Detector.SpellChecker = null;
+        }
+    }
+
+    [Test]
+    public static void Issue357_Delegate_StaysEnglish()
+    {
+        // Issue #357: handanwodelegatesuru が 判断をでlegateする (de|legate) になっていた。今の main では delegate のまま (戻らないように)
+        CompositionTests.Detector.SpellChecker = Detection.BuiltInWordChecker.Shared;
+        try
+        {
+            foreach (var (typed, expected) in new[] { ("handanwodelegatesuru", "はんだんをdelegateする"), ("delegate", "delegate"), ("delegatewotsukau", "delegateをつかう") })
+            {
+                var k = new CompositionTests.Keyboard();
+                k.Type(typed + "\n");
+                Assert.Equal(expected, k.Host.Document, typed);
+            }
+        }
+        finally
+        {
+            CompositionTests.Detector.SpellChecker = null;
+        }
+    }
+
+    [Test]
+    public static void Issue378_Memoirs_StaysEnglish()
+    {
+        // Issue #378: memoirs が メモリ絵s になる報告。今の main では memoirs・memories とも英字のまま (戻らないように)
+        CompositionTests.Detector.SpellChecker = Detection.BuiltInWordChecker.Shared;
+        try
+        {
+            foreach (var (typed, expected) in new[] { ("memoirs", "memoirs"), ("memories", "memories"), ("memoirsgaii", "memoirsがいい") })
+            {
+                var k = new CompositionTests.Keyboard();
+                k.Type(typed + "\n");
+                Assert.Equal(expected, k.Host.Document, typed);
+            }
+        }
+        finally
+        {
+            CompositionTests.Detector.SpellChecker = null;
+        }
+    }
+
+    [Test]
     public static void ShiftedSingleConsonant_StaysUppercase()
     {
         foreach (var c in "WRTYPSDGHKLZXVBNM")
@@ -96,7 +265,10 @@ internal static class FeedbackTests
     public static void TripleSlash_IsEllipsis()
     {
         // 報告 (Discord のリスト #4): /// を … にできるようにする。URL (file:///) はそのまま。
-        Assert.Equal("…", Showing("///"));
+        // 入力欄の先頭の /// は /command と同じくそのままアプリへ渡す (#193)。設定で OFF にすれば … にできる。
+        var k = new CompositionTests.Keyboard { SigilWords = false };
+        k.Type("///");
+        Assert.Equal("…", k.Showing);
         Assert.Equal("それで…", Showing("sorede///"));
         Assert.Equal("file:///", Showing("file:///"));
     }
@@ -210,6 +382,38 @@ internal static class KanaInputTests
         var japanese = Kana();
         japanese.TypeKanaKeys("byiaf");
         Assert.Equal("こんにちは", japanese.Showing);
+    }
+
+    [Test]
+    public static void KanaInput_ShiftOverlappingAKey_StaysKana()
+    {
+        // #135: にゅうりょく の ゅ (Shift+8) を打つ Shift が、前後のキー (に = I) に重なると、Shift+I が英字の I として残っていた (Iゅ雨力)。
+        // かな入力で、Shift を押した英字 1 文字の後ろにかなが続くなら、かなの打ち間違い (Shift の押しすぎ)
+        foreach (var keys in new[]
+        {
+            new[] { (0x49, true), (0x38, true), (0x34, false), (0x4C, false), (0x39, true), (0x48, false) },  // Shift+I ゅ う り ょ く
+            new[] { (0x49, false), (0x38, true), (0x34, false), (0x4C, true), (0x39, true), (0x48, false) }, // に ゅ う Shift+L ょ く
+        })
+        {
+            var k = Kana();
+            k.TypeKeys(keys);
+            Assert.Equal("にゅうりょく", k.Showing, string.Join(" ", keys.Select(x => (x.Item2 ? "Shift+" : "") + (char)x.Item1)));
+        }
+        // 大文字で始まる英単語 (Google) は今までどおり英字
+        var word = Kana();
+        word.TypeKeys((0x47, true), (0x4F, false), (0x4F, false), (0x47, false), (0x4C, false), (0x45, false));
+        Assert.Equal("Google", word.Showing);
+    }
+
+    [Test]
+    public static void KanaInput_Punctuation_FollowsSetting()
+    {
+        // かな入力の 、 (Shift+ね) と 。 (Shift+る) も句読点の設定に合わせる
+        var k = Kana();
+        k.Punctuation = PunctuationStyle.FullWidthCommaPeriod;
+        k.TypeKeys(KanaQualityTests.KeysFor("はい、はい。"));
+        k.Type("\n");
+        Assert.Equal("はい，はい．", k.Host.Document);
     }
 
     [Test]
@@ -379,6 +583,29 @@ internal static class CodeProfileTests
     }
 
     [Test]
+    public static void AppRules_LaterRuleForTheSameApp_Wins()
+    {
+        // #233: 既定の一覧の Code.exe (コード) の後ろに、config.json で Enabled: false の Code.exe を足しても OFF にならなかった
+        var directory = Path.Combine(Path.GetTempPath(), "meltype-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var config = Path.Combine(directory, "config.json");
+            var settings = new Settings();
+            settings.AppRules.Add(new AppRule { Process = "code.exe", Enabled = false });
+            settings.Save(config);
+            var loaded = Settings.Load(config);
+            Assert.True(!loaded.IsAppEnabled("Code.exe"), "後から足した OFF を使う");
+            Assert.Equal(1, loaded.AppRules.Count(r => string.Equals(r.Process, "Code.exe", StringComparison.OrdinalIgnoreCase)), "1 つにまとめる");
+            Assert.True(loaded.IsAppEnabled("pwsh.exe"), "ほかのアプリはそのまま");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Test]
     public static void Settings_CustomAppKinds()
     {
         // 報告: アプリ別設定の種類を、一般とコードだけでなく自分で作れるように。
@@ -507,13 +734,239 @@ internal static class LanguageLearningTests
     public static void SymbolCandidates_ShowHalfOrFullWidth()
     {
         // 変換の候補で、記号が半角か全角か分からなかった (@ と ＠)。両方あるときは右に「半角」「全角」と出す。
-        var k = new CompositionTests.Keyboard();
+        var k = new CompositionTests.Keyboard { SigilWords = false };
         k.Type("@ ");
         var view = k.Host.View!;
         Assert.True(view.Converting, "変換中");
         var notes = view.Notes ?? [];
         Assert.Equal("半角", notes.ElementAtOrDefault(view.Candidates.ToList().IndexOf("@")), string.Join(" ", view.Candidates));
         Assert.Equal("全角", notes.ElementAtOrDefault(view.Candidates.ToList().IndexOf("＠")), string.Join(" ", view.Candidates));
+    }
+
+  [Test]
+  public static void Brand_TeamsFromChiimusu()
+  {
+    // ちーむす でも Teams を出す (issue #47。ちーむず だけだった)
+    var candidates = CandidateDictionary.Load(null);
+    Assert.True(candidates.Lookup("ちーむす").Contains("Teams"), string.Join(" ", candidates.Lookup("ちーむす")));
+    Assert.True(candidates.Lookup("ちーむず").Contains("Teams"), "ちーむず も今までどおり");
+  }
+
+  [Test]
+  public static void Phrase_AgeashiWoToru()
+  {
+    // 揚げ足取るな が 揚げ足とルナ になっていた (issue #147)。同梱の語句で 揚げ足取る を 1 つの文節にする
+    var k = new CompositionTests.Keyboard(userDictionary: new UserDictionary(null));
+    k.Type("ageashitoruna ");
+    var view = k.Host.View!;
+    Assert.True(view.Converting, "変換中");
+    Assert.Equal("揚げ足取る", view.Clauses![0], string.Join("|", view.Clauses));
+  }
+
+    [Test]
+    public static void TesterNames_AreCandidates()
+    {
+        // 協力してくださった方々の名前を変換しやすくする (issue #156)
+        var candidates = CandidateDictionary.Load(null);
+        foreach (var (reading, name) in new[] { ("くらいど", "くらいど！"), ("ことね", "琴音"), ("ことねりんく", "琴音Link"), ("れい", "Ray") })
+            Assert.True(candidates.Lookup(reading).Contains(name), reading + ": " + string.Join(" ", candidates.Lookup(reading)));
+    }
+
+    [Test]
+    public static void CompositionSize_LargerChoicesAreSaved()
+    {
+        // 変換ボックスの文字をもっと大きくしたい (issue #164): 特大・最大 を選べて、保存しても残る
+        var path = Path.Combine(Path.GetTempPath(), $"meltype-size-{Guid.NewGuid():N}.json");
+        try
+        {
+            foreach (var size in new[] { CompositionSize.ExtraLarge, CompositionSize.Huge })
+            {
+                new Settings { CompositionSize = size }.Save(path);
+                Assert.Equal(size, Settings.Load(path).CompositionSize);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Test]
+    public static void CompositionFont_IsSaved()
+    {
+        // 変換ボックスのフォントを変えたい (issue #165): 既定は空 (Yu Gothic UI)、選んだフォントは保存しても残る
+        Assert.Equal("", new Settings().CompositionFont);
+        var path = Path.Combine(Path.GetTempPath(), $"meltype-font-{Guid.NewGuid():N}.json");
+        try
+        {
+            new Settings { CompositionFont = "Meiryo UI" }.Save(path);
+            Assert.Equal("Meiryo UI", Settings.Load(path).CompositionFont);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Test]
+    public static void CompositionAppearance_IsSavedByName()
+    {
+        // 変換ボックスの色 (ライト / Windows に合わせる)・不透明度・カーソルの上に出す (issue #39): 既定は今までどおりで、選んだ値は名前で保存して残る
+        var defaults = new Settings();
+        Assert.Equal(CompositionTheme.Dark, defaults.CompositionTheme);
+        Assert.Equal(CompositionOpacity.Opaque, defaults.CompositionOpacity);
+        Assert.Equal(1.0, defaults.CompositionOpacityValue);
+        var path = Path.Combine(Path.GetTempPath(), $"meltype-theme-{Guid.NewGuid():N}.json");
+        try
+        {
+            new Settings { CompositionTheme = CompositionTheme.System, CompositionOpacity = CompositionOpacity.Percent80, CompositionPlacement = CompositionPlacement.AboveCaret }.Save(path);
+            var json = File.ReadAllText(path);
+            Assert.True(json.Contains("\"CompositionTheme\": \"System\"") && json.Contains("\"CompositionOpacity\": \"Percent80\"") && json.Contains("\"AboveCaret\""), json);
+            var loaded = Settings.Load(path);
+            Assert.Equal(CompositionTheme.System, loaded.CompositionTheme);
+            Assert.Equal(CompositionOpacity.Percent80, loaded.CompositionOpacity);
+            Assert.Equal(0.8, loaded.CompositionOpacityValue);
+            Assert.Equal(CompositionPlacement.AboveCaret, loaded.CompositionPlacement);
+            foreach (var (theme, opacity) in new[] { (CompositionTheme.Light, CompositionOpacity.Percent90), (CompositionTheme.Dark, CompositionOpacity.Percent70) })
+            {
+                new Settings { CompositionTheme = theme, CompositionOpacity = opacity }.Save(path);
+                Assert.Equal(theme, Settings.Load(path).CompositionTheme);
+                Assert.Equal(opacity, Settings.Load(path).CompositionOpacity);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Test]
+    public static void CompositionTheme_FollowsWindowsOnlyWhenAsked()
+    {
+        // 「Windows の設定に合わせる」は Windows のアプリ モードどおり (読めなければダーク)。ライト / ダークは Windows の設定によらない
+        Assert.True(!new Settings().CompositionIsLight(true), "既定はダーク");
+        Assert.True(new Settings { CompositionTheme = CompositionTheme.Light }.CompositionIsLight(false), "ライト");
+        var system = new Settings { CompositionTheme = CompositionTheme.System };
+        Assert.True(system.CompositionIsLight(true), "Windows がライト");
+        Assert.True(!system.CompositionIsLight(false), "Windows がダーク");
+        Assert.True(!system.CompositionIsLight(null), "読めなければダーク");
+    }
+
+    [Test]
+    public static void DoubledUnitAfterNumber_ShowsLettersWhileTyping()
+    {
+        // 50cc を打っている途中に 50っc と出ていた (issue #130)。確定した結果は直っていたが、途中の表示も 50cc にする
+        var k = new CompositionTests.Keyboard();
+        k.Type("50cc");
+        Assert.Equal("50cc", k.Showing);
+        k.Type("genntuki\n");
+        Assert.Equal("50ccげんつき", k.Host.Document);
+        // mm は mmol の打ちかけかもしれないので、今までどおり続きを待つ
+        k = new CompositionTests.Keyboard();
+        k.Type("2mmol\n");
+        Assert.Equal("2mmol", k.Host.Document);
+        // mm の後ろに日本語が続けば、確定した結果は単位の mm
+        k = new CompositionTests.Keyboard();
+        k.Type("10mmdesu");
+        Assert.Equal("10mmです", k.Showing);
+        // c 1 つは単位の打ちかけとして英字のまま
+        k = new CompositionTests.Keyboard();
+        k.Type("5c");
+        Assert.Equal("5c", k.Showing);
+    }
+
+    [Test]
+    public static void AcronymThenRomaji_IsJapanese()
+    {
+        // 大文字の略語の後ろのローマ字 (AInituite → AIについて: issue #129)。
+        // AIde を英単語 aide、AInit を init と読んで、後ろまで英字にしていた
+        foreach (var (typed, expected) in new[]
+        {
+            ("AInituite", "AIについて"), ("AInitsuite", "AIについて"), ("AIdekiru", "AIできる"), ("GPTnituite", "GPTについて"),
+            ("AIde", "AIで"), ("iOSdekiru", "iOSできる"),
+            // 略語に英単語が続くもの・英文の中の略語は英語のまま
+            ("HTTPserver", "HTTPserver"), ("GPT is great", "GPT is great"), ("use HTTPS for login", "use HTTPS for login"),
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+    }
+
+    [Test]
+    public static void ShortHeadThenCapital_IsName()
+    {
+        // #266: McAfeeto が McA|feeto で切れて McAふぇえと になっていた。Mc・Le の後ろの大文字で終わる頭 (McA・LeB) は略語ではなく名前の途中
+        foreach (var (typed, expected) in new[]
+        {
+            ("McAfeeto", "McAfeeと"), ("McAfeewo", "McAfeeを"), ("McAfeede", "McAfeeで"), ("LeBronde", "LeBronで"),
+            // 英単語 + 大文字 1 文字・大文字が続く略語は今までどおり区切る
+            ("PlanBdeiku", "PlanBでいく"), ("TypeAnohou", "TypeAのほう"), ("OrpCde", "OrpCで"), ("oRPCde", "oRPCで"), ("ORPCde", "ORPCで"),
+            ("OCRwoshi", "OCRをし"), ("DeNAde", "DeNAで"), ("OpenAIno", "OpenAIの"), ("Anisiyouka", "Aにしようか"), ("MrXde", "MrXで"),
+            ("McAfee", "McAfee"), ("McKinseyde", "McKinseyで"), ("McDonaldsde", "McDonaldsで"),
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
+
+        var typing = new CompositionTests.Keyboard();
+        typing.Type("McAfeeto");
+        Assert.Equal("McAfeeと", typing.Showing);
+    }
+
+    [Test]
+    public static void AllowInjectedInput_IsSharedAndOffByDefault()
+    {
+        // 遠隔操作 (AnyDesk・VNC) のキーも処理する設定 (issue #110)。既定は OFF、保存して残り、全プロファイル共通
+        var path = Path.Combine(Path.GetTempPath(), $"meltype-injected-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(path, "{}");
+            Assert.True(!Settings.Load(path).AllowInjectedInput, "既存の設定ファイルでは OFF");
+            var settings = new Settings { AllowInjectedInput = true };
+            settings.Clone().Normalize().Save(path);
+            Assert.True(Settings.Load(path).AllowInjectedInput, "保存・複製・読み込みで設定が残る");
+            var profile = settings.Normalize().AddProfile("仕事用")!;
+            profile.AllowInjectedInput = false;
+            Assert.True(!profile.SwitchProfile(Settings.DefaultProfileName).AllowInjectedInput, "全プロファイル共通の設定");
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Test]
+    public static void JsonFiles_ReadWithGeneratedMetadata()
+    {
+        // Mac・Linux (NativeAOT) で config.json・languages.json・conversions.json が読めず、上書きで消えていた (issue #151)。
+        // 読み書きをビルド時に作った型の情報 (ソース生成) に変えたので、今までの形式のファイルがそのまま読めることを確かめる
+        var dir = Path.Combine(Path.GetTempPath(), $"meltype-json-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var config = Path.Combine(dir, "config.json");
+            File.WriteAllText(config, "{\n  // コメント\n  \"FileLog\": true,\n  \"Mode\": \"Keyboard\",\n  \"DetectionLevel\": \"Conservative\",\n  \"AppRules\": [{ \"Process\": \"code.exe\", \"Profile\": \"Code\" }],\n}");
+            var settings = Settings.Load(config);
+            Assert.True(settings.FileLog, "FileLog");
+            Assert.Equal(DetectionLevel.Conservative, settings.DetectionLevel);
+            Assert.Equal(AppProfile.Code, settings.ProfileFor("code.exe"));
+            Assert.True(!File.Exists(config + ".broken"), "壊れたとみなさない");
+            settings.Save(config);
+            Assert.True(File.ReadAllText(config).Contains("\"DetectionLevel\": \"Conservative\""), "列挙型は名前で保存する");
+
+            var languages = Path.Combine(dir, "languages.json");
+            File.WriteAllText(languages, "{\"emoji\":{\"English\":true,\"Used\":\"2026-10-01T00:00:00Z\",\"Count\":3,\"Explicit\":true}}");
+            Assert.Equal(true, new LanguageMemory(languages).Get("emoji"));
+
+            var conversions = Path.Combine(dir, "conversions.json");
+            File.WriteAllText(conversions, "{\"ごかん\":{\"Text\":\"互換\",\"Used\":\"2026-10-01T00:00:00Z\"}}");
+            var history = new ConversionHistory(conversions);
+            Assert.Equal("互換", history.Get("ごかん"));
+            history.Remember("きごう", "記号");
+            Assert.Equal("互換", new ConversionHistory(conversions).Get("ごかん"), "保存しても前の学習が残る");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 
     [Test]
@@ -524,6 +977,11 @@ internal static class LanguageLearningTests
         {
             ("10mmde", "10mmで"), ("kyouha10mmdesu", "きょうは10mmです"), ("5min", "5min"), ("3mol", "3mol"), ("2mmol", "2mmol"),
             ("100mlnomizu", "100mlのみず"), ("3nin", "3にん"), ("1man", "1まん"), ("10mina", "10みな"), ("5ko", "5こ"),
+            // cc も 1 語の単位 (50cc原付 が 50っc原付 になっていた: issue #130)。ppm・ppb・ppt も同じく促音になっていた
+            ("50cc", "50cc"), ("50ccgenntuki", "50ccげんつき"), ("150ccdattara", "150ccだったら"), ("50ccwokatta", "50ccをかった"),
+            ("100ppm", "100ppm"), ("50ppbhikaku", "50ppbひかく"),
+            // 数字の後ろでない っ (ccha・tchi 系) は今までどおりかな
+            ("cchau", "っちゃう"), ("yacchatta", "やっちゃった"), ("50ccha", "50ccは"), ("50ccchan", "50ccちゃん"),
         })
         {
             var k = new CompositionTests.Keyboard();
@@ -555,9 +1013,18 @@ internal static class LanguageLearningTests
                 ("cyiisai", "ちぃいさい"), ("yiu", "いう"), ("wu", "う"), ("ceito", "せいと"),
                 ("translatebot[Thinking is thinking]", "translatebot「Thinking is thinking」"), ("fuwafuwanacornyorifuwafuwanachocolatenohougayum", "ふわふわなcornよりふわふわなchocolateのほうがyum"),
                 ("hey yo say!", "hey yo say!"), ("korosuzobot", "ころすぞbot"),
-                ("appuruulottitukereba", "あっぷるうぉっちつければ"), ("JapanesetoEnglishwohodohodonimazetahougagoodkamoshirenai", "JapaneseとEnglishをほどほどにまぜたほうがgoodかもしれない"), ("JavaScriptwokaku", "JavaScriptをかく"), ("iPaddeiisonnnadekakunakute", "iPadでいいそんなでかくなくて"), ("atohahelppe-jitoka", "あとはhelpぺーじとか"), ("HHireta", "HHいれた"), ("grokga", "grokが"), ("grokniyoruto", "grokによると"), ("guri-nnshanottara51kmijoukukan", "ぐりーんしゃのったら51kmいじょうくかん"), ("shitaraavgadete", "したらavがでて"), ("jimotogeoguessershitetara", "じもとgeoguesserしてたら"), ("jiketsurtashite", "じけつrtaして"),
+                ("appuruulottitukereba", "あっぷるうぉっちつければ"), ("JapanesetoEnglishwohodohodonimazetahougagoodkamoshirenai", "JapaneseとEnglishをほどほどにまぜたほうがgoodかもしれない"), ("JavaScriptwokaku", "JavaScriptをかく"), ("iPaddeiisonnnadekakunakute", "iPadでいいそんなでかくなくて"), ("atohahelppe-jitoka", "あとはhelpぺーじとか"), ("HHireta", "HHいれた"), ("grokga", "grokが"), ("cwdde", "cwdで"), ("pwdde", "pwdで"), ("cwdga", "cwdが"), ("grokniyoruto", "grokによると"), ("guri-nnshanottara51kmijoukukan", "ぐりーんしゃのったら51kmいじょうくかん"), ("shitaraavgadete", "したらavがでて"), ("jimotogeoguessershitetara", "じもとgeoguesserしてたら"), ("jiketsurtashite", "じけつrtaして"),
+                // Issue #375: 知らない英字の語の最後の文字と助詞の頭が同じ (cwd + de) でも区切る (語の頭から読めないので っ の綴りではない)
                 // summary.json (2026-10-05): 音の途中から始まる英単語 (kara|na|l の anal、da|me|x の amex) で小書き文字が崩れていた
                 ("yakaranala", "やからなぁ"), ("damexe", "だめぇ"), ("hotelya", "hotelや"),
+                // Issue #104: 英単語 (moral) の最後の l + tu が っ にならなかった。英単語 + つ (hotel|tukau) は今までどおり
+                ("moraltute", "もらって"), ("hoteltukau", "hotelつかう"), ("hoteltsukau", "hotelつかう"), ("mailtukau", "mailつかう"), ("realtukau", "realつかう"), ("tooltukau", "toolつかう"), ("sukilltute", "すkillつて"), ("Moraltute", "Moralつて"),
+                // Issue #218: 英単語 (hotel・total) の後ろでわざわざ打った ltu が、l の重なり (te|ll = tell) で英字になっていた
+                ("hotelltu", "hotelっ"), ("hotelltsu", "hotelっ"), ("totalltute", "totalって"), ("hotellya", "hotellや"), ("welltuned", "welltuned"),
+                // Issue #220: 表示では tabで なのに、確定すると打ち間違いとして たべ に直されていた
+                ("tabde", "tabで"), ("tabga", "tabが"), ("kyouhatabdeyaru", "きょうはtabでやる"), ("tabete", "たべて"), ("onegaishimsu", "おねがいします"),
+                // 伸ばす音の う + について (そう|u|ni|t の unit) で、t と s が つ にならず英単語 unit になっていた。英単語 + する (commit|する) は今までどおり
+                ("sounitsuite", "そうについて"), ("hontounitsukareta", "ほんとうにつかれた"), ("kaijounitsukuto", "かいじょうにつくと"), ("kyouhacommitsuru", "きょうはcommitする"), ("editsuru", "editする"),
                 // 笑いの w (文末の w が消えていた、ww が っw になっていた)。英単語の最後の w はそのまま
                 ("kiyagattaw", "きやがったw"), ("daneww", "だねww"), ("toottawwwww", "とおったwwwww"), ("wwww", "wwww"), ("kitaww!", "きたww！"), ("new", "new"), ("aww", "aww"),
                 // 読めない略語の最後の c + は・や (vrc|ya が vr|ちゃ になっていた)。読める語 (まち) と大文字の略語の後ろ (EDちゃう) は分けない
@@ -574,13 +1041,15 @@ internal static class LanguageLearningTests
                 ("tougouhandakaraBEkana?", "とうごうはんだからBEかな？"), ("fubusangaXshisuginadakenanda!!", "ふぶさんがXしすぎなだけなんだ！！"), ("tsubemyunorevancedtsukatteru", "つべみゅのrevancedつかってる"),
                 // テスターの報告 (2026-10-05): 英語のユーザー名が打てない。@ の後ろ (メンション)・_ の入った語は英字のまま
                 ("@kuraido", "@kuraido"), ("@una08142009 arigatou", "@una08142009 ありがとう"), ("upah_setu", "upah_setu"), ("cafely_latte", "cafely_latte"),
-                ("taro@gmail.com", "たろ@gmail.com"), ("@akisamesan", "@akisamesan"),
+                // メールアドレスは @ の前も英字のまま (issue #59。前は たろ@... だった。例には example.com を使う)
+                ("taro@example.com", "taro@example.com"), ("@akisamesan", "@akisamesan"),
                 // Issue #12: ローマ字として読めてしまう英単語 (feature → ふぇあつれ)。日本語の中でも英字
                 ("feature", "feature"), ("future", "future"), ("nature", "nature"), ("remote", "remote"), ("online", "online"),
                 ("atarashiifeaturewotsuika", "あたらしいfeatureをついか"), ("kyouharemotedesu", "きょうはremoteです"),
             })
             {
-                var k = new CompositionTests.Keyboard();
+                // 先頭の @ の語 (#193) はそのままアプリへ渡すので、ここは変換ボックスに入れたときの扱いを確かめる。
+                var k = new CompositionTests.Keyboard { SigilWords = false };
                 k.Type(typed + "\n");
                 Assert.Equal(expected, k.Host.Document, typed);
             }
@@ -740,5 +1209,49 @@ internal static class RomajiTypoTests
         k.CorrectTypos = false;
         k.Type("onegaishimsu\n");
         Assert.Equal("おねがいしmす", k.Host.Document);
+    }
+
+    [Test]
+    public static void Issue243_BacktickBeforeEnglish_IsHalfWidth()
+    {
+        // Issue #243: 後ろが英語のバッククォート (Markdown のインラインコード) も ( " と同じく半角にする
+        CompositionTests.Detector.SpellChecker = TestSupport.WordChecker is { IsAvailable: true } checker ? checker : Detection.BuiltInWordChecker.Shared;
+        try
+        {
+            foreach (var (typed, expected) in new[]
+            {
+                ("kore`git status`dekakunin", "これ`git status`でかくにん"),
+                ("`npm install`wojikkou", "`npm install`をじっこう"),
+                ("`kakko`", "｀かっこ｀"),
+            })
+            {
+                var k = new CompositionTests.Keyboard();
+                k.Type(typed + "\n");
+                Assert.Equal(expected, k.Host.Document, typed);
+            }
+        }
+        finally
+        {
+            CompositionTests.Detector.SpellChecker = null;
+        }
+    }
+
+    [Test]
+    public static void CamelCaseWord_AfterJapanese_SplitsOffJapanese()
+    {
+        foreach (var (typed, expected) in new[]
+        {
+            ("kyouhaGitHubni", "きょうはGitHubに"),
+            ("kyouhaGitHubnipushshita", "きょうはGitHubにpushした"),
+            ("camelCaseName", "camelCaseName"),         // 識別子はそのまま英字
+            ("getElementById", "getElementById"),
+            ("dataSetName", "dataSetName"),
+            ("sakuraTreeNode", "sakuraTreeNode"),       // 助詞で終わらないローマ字の名前も識別子
+        })
+        {
+            var k = new CompositionTests.Keyboard();
+            k.Type(typed + "\n");
+            Assert.Equal(expected, k.Host.Document, typed);
+        }
     }
 }
