@@ -50,7 +50,7 @@ def _report_url():
     """不具合報告を開く URL (OS・版・実行環境を入れたもの)。"""
     pointer = _lib.meltype_report_url(b"Linux")
     if not pointer:
-        return "https://github.com/yksr-melt/Meltype/issues/new/choose"
+        return "https://github.com/roccho-dev/Meltype/issues/new/choose"
     try:
         return ctypes.string_at(pointer).decode("utf-8")
     finally:
@@ -335,7 +335,8 @@ def main():
         bus.request_name("org.freedesktop.IBus.Meltype", 0)
     else:
         # 手で起動したとき (試すとき): コンポーネントを登録する
-        component = IBus.Component.new("org.freedesktop.IBus.Meltype", "Meltype", "1.2.1", "GPL-3.0-or-later", "Yukishiro", "https://github.com/yksr-melt/Meltype", "", "")
+        # 版は書かない (ここに固定で書くと本体の版とずれる。版は「不具合の報告・提案…」で開く画面に本体が入れる)
+        component = IBus.Component.new("org.freedesktop.IBus.Meltype", "Meltype", "", "GPL-3.0-or-later", "Yukishiro", "https://github.com/roccho-dev/Meltype", "", "")
         component.add_engine(IBus.EngineDesc.new("meltype", "Meltype", "Meltype", "ja", "GPL-3.0-or-later", "Yukishiro", "", "default"))
         bus.register_component(component)
     loop.run()
