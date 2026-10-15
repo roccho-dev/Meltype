@@ -24,12 +24,14 @@ internal static class ProfileTests
 
         // 標準に戻すと、標準の値に戻る。共通の項目 (ログ・更新) は切り替えても変わらない
         work.FileLog = true;
+        work.TsfOffered = true;
         var standard = work.SwitchProfile("標準");
         Assert.Equal("標準", standard.ActiveProfile);
         Assert.Equal(DetectionLevel.Balanced, standard.DetectionLevel);
         Assert.True(standard.LiveConversion, "標準はライブ変換 ON のまま");
         Assert.Equal(0, standard.AppKinds.Count, "表 (独自の種類) もプロファイルごと");
         Assert.True(standard.FileLog, "ログはどのプロファイルでも共通");
+        Assert.True(standard.TsfOffered, "Meltype IME を入れるかを聞いたかは、どのプロファイルでも共通 (切り替えるたびに聞かない)");
 
         // もう一度 仕事用 にすると、仕事用で変えた値が戻ってくる
         var back = standard.SwitchProfile("仕事用");
@@ -111,5 +113,33 @@ internal static class ProfileTests
         Assert.True(!settings.UsesPaste("notepad.exe") && !settings.UsesPaste(null), "ほかのアプリは今までどおり");
         settings.PasteApps = "Resolve.exe, LINE.exe ;foo.exe";
         Assert.True(settings.UsesPaste("LINE.exe") && settings.UsesPaste("foo.exe"), "カンマ・セミコロン区切り");
+    }
+    [Test]
+    public static void TextInputApps_MatchProcessNames()
+    {
+        // #52: Premiere Pro は入力欄と判定されないので、設定に書いたアプリではフォーカスのある所を入力欄として扱う
+        var settings = new Settings().Normalize();
+        Assert.True(!settings.TreatsAsTextInput("Adobe Premiere Pro.exe") && !settings.TreatsAsTextInput(null), "既定は空 (何もしない)");
+        settings.TextInputApps = " Adobe Premiere Pro.exe , foo.exe;bar.exe ";
+        Assert.True(settings.TreatsAsTextInput("Adobe Premiere Pro.exe") && settings.TreatsAsTextInput("adobe premiere pro.EXE"), "空白を含む名前 (大文字小文字は問わない)");
+        Assert.True(settings.TreatsAsTextInput("foo.exe") && settings.TreatsAsTextInput("bar.exe"), "カンマ・セミコロン区切り");
+        Assert.True(!settings.TreatsAsTextInput("Adobe") && !settings.TreatsAsTextInput("Pro.exe") && !settings.TreatsAsTextInput("Premiere"), "名前の一部では一致しない");
+        Assert.True(!settings.TreatsAsTextInput("AfterFX.exe"), "書いていないアプリはそのまま");
+        settings.TextInputApps = "a.exe b.exe";
+        Assert.True(settings.TreatsAsTextInput("a.exe") && settings.TreatsAsTextInput("b.exe"), "空白区切りの .exe の並びも通す");
+
+        var path = Path.Combine(Path.GetTempPath(), $"meltype-textinput-{Guid.NewGuid():N}.json");
+        try
+        {
+            new Settings { TextInputApps = "Adobe Premiere Pro.exe" }.Save(path);
+            var loaded = Settings.Load(path);
+            Assert.Equal("Adobe Premiere Pro.exe", loaded.TextInputApps, "保存して読み込んでも保つ");
+            Assert.True(loaded.Clone().TreatsAsTextInput("Adobe Premiere Pro.exe"), "複製しても保つ");
+            Assert.Equal("", Settings.Load(Path.Combine(Path.GetTempPath(), $"meltype-none-{Guid.NewGuid():N}.json")).TextInputApps, "設定ファイルが無ければ空");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 }

@@ -14,16 +14,22 @@ namespace Meltype.Composition;
 internal sealed class UiAutomation
 {
     // プロパティ ID・パターン ID・コントロールの種類 (UIAutomationClient.h)
-    public const int ControlTypeEdit = 50004, ControlTypeDocument = 50030, ControlTypeComboBox = 50003;
-    private const int BoundingRectangleProperty = 30001, ControlTypeProperty = 30003, NameProperty = 30005,
+    public const int ControlTypeEdit = 50004, ControlTypeDocument = 50030, ControlTypeComboBox = 50003, ControlTypePane = 50033, ControlTypeText = 50020;
+    private const int BoundingRectangleProperty = 30001, ProcessIdProperty = 30002, ControlTypeProperty = 30003, NameProperty = 30005,
+        AutomationIdProperty = 30011, NativeWindowHandleProperty = 30020,
         IsKeyboardFocusableProperty = 30009, ClassNameProperty = 30012, IsPasswordProperty = 30019,
         ValueValueProperty = 30045, ValueIsReadOnlyProperty = 30046, IsValuePatternAvailableProperty = 30043,
         IsTextPatternAvailableProperty = 30040;
-    private const int TextPatternId = 10014;
+    private const int TextPatternId = 10014, LegacyIAccessiblePatternId = 10018;
+    private const int Ia2StateEditable = 0x8;
+    private const int Ia2StatesVTableSlot = 35;
     private const int TextUnitCharacter = 0;
     private const int EndpointStart = 0, EndpointEnd = 1;
 
     private static readonly Guid ClsidCUIAutomation = new("FF48DBA4-60EF-4201-AA87-54103EEF594E");
+    private static readonly Guid IidIServiceProvider = new("6D5140C1-7436-11CE-8034-00AA006009FA");
+    private static readonly Guid IidIAccessible = new("618736E0-3C3D-11CF-810C-00AA00389B71");
+    private static readonly Guid IidIAccessible2 = new("E89F726E-C4F4-4C19-BB19-B647D7FA8478");
 
     private readonly IUIAutomation _automation;
 
@@ -47,6 +53,22 @@ internal sealed class UiAutomation
         return hr >= 0 && element is not null ? new Element(element) : null;
     }
 
+    /// <summary>窓直下にも現れる Affinity の Static を、PART_RenderControl の子の HWND と照合する。</summary>
+    public bool IsRenderControl(IntPtr foreground, Element focused, int focusedWindow)
+    {
+        if (foreground == IntPtr.Zero || focusedWindow == 0 ||
+            _automation.ElementFromHandle(foreground, out var window) < 0 || window is null ||
+            new Element(window).ProcessId != focused.ProcessId ||
+            _automation.CreatePropertyCondition(AutomationIdProperty, "PART_RenderControl", out var hostCondition) < 0 || hostCondition is null ||
+            window.FindFirst(4 /* Descendants */, hostCondition, out var host) < 0 || host is null) return false;
+        var hostInfo = new Element(host);
+        if (hostInfo.ClassName != "HwndHost" || hostInfo.ProcessId != focused.ProcessId ||
+            _automation.CreatePropertyCondition(NativeWindowHandleProperty, focusedWindow, out var handleCondition) < 0 || handleCondition is null ||
+            host.FindFirst(2 /* Children */, handleCondition, out var child) < 0 || child is null) return false;
+        var childInfo = new Element(child);
+        return childInfo.ProcessId == focused.ProcessId && (childInfo.ControlType is ControlTypePane or ControlTypeText) && childInfo.ClassName == "Static";
+    }
+
     public sealed class Element
     {
         private readonly IUIAutomationElement _element;
@@ -56,6 +78,8 @@ internal sealed class UiAutomation
         private object? Get(int property) => _element.GetCurrentPropertyValue(property, out var value) >= 0 ? value : null;
 
         public int ControlType => Get(ControlTypeProperty) is int type ? type : 0;
+        public int ProcessId => Get(ProcessIdProperty) is int process ? process : 0;
+        public int NativeWindowHandle => Get(NativeWindowHandleProperty) is int window ? window : 0;
         public string Name => Get(NameProperty) as string ?? "";
         public string ClassName => Get(ClassNameProperty) as string ?? "";
         public bool IsPassword => Get(IsPasswordProperty) is true;
@@ -64,6 +88,79 @@ internal sealed class UiAutomation
         public bool HasTextPattern => Get(IsTextPatternAvailableProperty) is true;
         public bool IsReadOnly => Get(ValueIsReadOnlyProperty) is true;
         public string Value => Get(ValueValueProperty) as string ?? "";
+
+        /// <summary>
+        /// UI Automation では入力欄と分からない要素が、IAccessible2 では編集可能として
+        /// 公開されているか調べる。Chromium / Electron の contenteditable などで使う。
+        /// </summary>
+        public unsafe bool IsIa2Editable()
+        {
+            try
+            {
+                if (_element.GetCurrentPattern(LegacyIAccessiblePatternId, out var patternObject) < 0 ||
+                    patternObject is not IUIAutomationLegacyIAccessiblePattern pattern ||
+                    pattern.GetIAccessible(out var accessible) < 0 ||
+                    accessible == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var serviceProviderIid = IidIServiceProvider;
+                    if (Marshal.QueryInterface(accessible, in serviceProviderIid, out var serviceProvider) < 0 ||
+                        serviceProvider == IntPtr.Zero)
+                    {
+                        return false;
+                    }
+
+                    try
+                    {
+                        var service = IidIAccessible;
+                        var iid = IidIAccessible2;
+                        IntPtr ia2 = IntPtr.Zero;
+
+                        var hr =
+                            ((delegate* unmanaged[Stdcall]<IntPtr, Guid*, Guid*, IntPtr*, int>)
+                                VTable(serviceProvider, 3))(
+                                    serviceProvider, &service, &iid, &ia2);
+
+                        if (hr < 0 || ia2 == IntPtr.Zero) return false;
+
+                        try
+                        {
+                            int states;
+                            hr =
+                                ((delegate* unmanaged[Stdcall]<IntPtr, int*, int>)
+                                    VTable(ia2, Ia2StatesVTableSlot))(
+                                        ia2, &states);
+
+                            return hr >= 0 && (states & Ia2StateEditable) != 0;
+                        }
+                        finally
+                        {
+                            Marshal.Release(ia2);
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.Release(serviceProvider);
+                    }
+                }
+                finally
+                {
+                    Marshal.Release(accessible);
+                }
+            }
+            catch
+            {
+                // IAccessible2 を使えない要素・アプリでは、従来の判定だけを使う。
+                return false;
+            }
+        }
+
+        private static unsafe IntPtr VTable(IntPtr instance, int slot) =>
+            (*(IntPtr**)instance)[slot];
 
         /// <summary>単一の選択範囲を取得。無ければ null。</summary>
         private IUIAutomationTextRange? SelectionRange()
@@ -158,17 +255,35 @@ internal sealed class UiAutomation
         [PreserveSig] int CompareElements();
         [PreserveSig] int CompareRuntimeIds();
         [PreserveSig] int GetRootElement(out IUIAutomationElement? root);
-        [PreserveSig] int ElementFromHandle();
+        [PreserveSig] int ElementFromHandle(IntPtr window, out IUIAutomationElement? element);
         [PreserveSig] int ElementFromPoint();
         [PreserveSig] int GetFocusedElement(out IUIAutomationElement? element);
+        [PreserveSig] int GetRootElementBuildCache();
+        [PreserveSig] int ElementFromHandleBuildCache();
+        [PreserveSig] int ElementFromPointBuildCache();
+        [PreserveSig] int GetFocusedElementBuildCache();
+        [PreserveSig] int CreateTreeWalker();
+        [PreserveSig] int get_ControlViewWalker();
+        [PreserveSig] int get_ContentViewWalker();
+        [PreserveSig] int get_RawViewWalker();
+        [PreserveSig] int get_RawViewCondition();
+        [PreserveSig] int get_ControlViewCondition();
+        [PreserveSig] int get_ContentViewCondition();
+        [PreserveSig] int CreateCacheRequest();
+        [PreserveSig] int CreateTrueCondition();
+        [PreserveSig] int CreateFalseCondition();
+        [PreserveSig] int CreatePropertyCondition(int propertyId, [MarshalAs(UnmanagedType.Struct)] object value, out IUIAutomationCondition? condition);
     }
+
+    [ComImport, Guid("352FFBA8-0973-437C-A61F-F64CAFD81DF9"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IUIAutomationCondition { }
 
     [ComImport, Guid("D22108AA-8AC5-49A5-837B-37BBB3D7591E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IUIAutomationElement
     {
         [PreserveSig] int SetFocus();
         [PreserveSig] int GetRuntimeId();
-        [PreserveSig] int FindFirst();
+        [PreserveSig] int FindFirst(int scope, IUIAutomationCondition condition, out IUIAutomationElement? element);
         [PreserveSig] int FindAll();
         [PreserveSig] int FindFirstBuildCache();
         [PreserveSig] int FindAllBuildCache();
@@ -180,6 +295,35 @@ internal sealed class UiAutomation
         [PreserveSig] int GetCurrentPatternAs();
         [PreserveSig] int GetCachedPatternAs();
         [PreserveSig] int GetCurrentPattern(int patternId, [MarshalAs(UnmanagedType.IUnknown)] out object? pattern);
+    }
+
+    [ComImport, Guid("828055AD-355B-4435-86D5-3B51C14A9B1B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IUIAutomationLegacyIAccessiblePattern
+    {
+        [PreserveSig] int Select();
+        [PreserveSig] int DoDefaultAction();
+        [PreserveSig] int SetValue();
+        [PreserveSig] int get_CurrentChildId();
+        [PreserveSig] int get_CurrentName();
+        [PreserveSig] int get_CurrentValue();
+        [PreserveSig] int get_CurrentDescription();
+        [PreserveSig] int get_CurrentRole();
+        [PreserveSig] int get_CurrentState();
+        [PreserveSig] int get_CurrentHelp();
+        [PreserveSig] int get_CurrentKeyboardShortcut();
+        [PreserveSig] int GetCurrentSelection();
+        [PreserveSig] int get_CurrentDefaultAction();
+        [PreserveSig] int get_CachedChildId();
+        [PreserveSig] int get_CachedName();
+        [PreserveSig] int get_CachedValue();
+        [PreserveSig] int get_CachedDescription();
+        [PreserveSig] int get_CachedRole();
+        [PreserveSig] int get_CachedState();
+        [PreserveSig] int get_CachedHelp();
+        [PreserveSig] int get_CachedKeyboardShortcut();
+        [PreserveSig] int GetCachedSelection();
+        [PreserveSig] int get_CachedDefaultAction();
+        [PreserveSig] int GetIAccessible(out IntPtr accessible);
     }
 
     [ComImport, Guid("32EBA289-3583-42C9-9C59-3B6D9A1E9B6A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
