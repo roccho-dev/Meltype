@@ -55,9 +55,9 @@ Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
 if (-not (Test-Path -LiteralPath $exe)) {
     Write-Host "コピーした Meltype.exe が見つかりません: $exe"
     Write-Host 'ウイルス対策ソフトが Meltype を止めた可能性があります。'
-    Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、公式の ZIP を再ダウンロードして再検査してください。'
+    Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の更新」で定義を更新し、https://github.com/roccho-dev/Meltype/releases の ZIP を再ダウンロードして再検査してください。'
     Write-Host 'Windows セキュリティ →「ウイルスと脅威の防止」→「保護の履歴」で検出名を確認してください。誤検知かどうかは、この状態だけでは判断できません。'
-    Write-Host '保護を無効にしたり「許可」に変更したりせず、版と検出名を https://github.com/yksr-melt/Meltype/issues に報告してください (個人名やパスは隠してください)。'
+    Write-Host '保護を無効にしたり「許可」に変更したりせず、版と検出名を https://github.com/roccho-dev/Meltype/issues に報告してください (個人名やパスは隠してください)。'
     exit 1
 }
 
@@ -68,15 +68,8 @@ Get-ChildItem -LiteralPath $target -Recurse -File | Unblock-File -ErrorAction Si
 # 前は zip を展開したフォルダーの Uninstall.cmd しか無く、zip を消していると探し直す手間がかかった。
 $uninstaller = Join-Path $target 'uninstall.ps1'
 $uninstallSource = Join-Path $PSScriptRoot 'uninstall.ps1'
-# インストーラー (Meltype-<版>-setup.exe) で入れていたら、その「設定 → アプリ」の項目の版だけ新しくする
-# (自動更新もこのスクリプトを使うので、項目が二重にならないように)。
-$innoKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Meltype_is1'
-if ((Test-Path -LiteralPath $innoKey) -and (Test-Path -LiteralPath (Join-Path $target 'unins000.exe'))) {
-    $version = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
-    Set-ItemProperty -Path $innoKey -Name DisplayVersion -Value $version
-    Set-ItemProperty -Path $innoKey -Name DisplayName -Value 'Meltype'
-}
-elseif (Test-Path -LiteralPath $uninstallSource) {
+# この版はインストーラー (setup.exe) を配らず、zip の install.ps1 だけで入れる。項目はいつもこのスクリプトが作る。
+if (Test-Path -LiteralPath $uninstallSource) {
     Copy-Item -LiteralPath $uninstallSource -Destination $uninstaller -Force
     Unblock-File -LiteralPath $uninstaller -ErrorAction SilentlyContinue
     $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Meltype'
@@ -89,7 +82,7 @@ elseif (Test-Path -LiteralPath $uninstallSource) {
         DisplayIcon     = $exe
         InstallLocation = $target
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uninstaller`" -FromSettings"
-        URLInfoAbout    = 'https://github.com/yksr-melt/Meltype'
+        URLInfoAbout    = 'https://github.com/roccho-dev/Meltype'
     }
     foreach ($name in $values.Keys) { Set-ItemProperty -Path $key -Name $name -Value $values[$name] }
     foreach ($name in 'NoModify', 'NoRepair') { Set-ItemProperty -Path $key -Name $name -Value 1 -Type DWord }
