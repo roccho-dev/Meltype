@@ -114,7 +114,7 @@ public sealed class TranslationHistory
         if (path is null || !File.Exists(path)) return;
         try
         {
-            var loaded = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, int>>>(File.ReadAllText(path));
+            var loaded = JsonSerializer.Deserialize(File.ReadAllText(path), Config.LearningJsonContext.Default.Translations);
             if (loaded is not null) foreach (var (key, value) in loaded) _counts[key] = value;
         }
         catch (Exception ex)
@@ -134,6 +134,13 @@ public sealed class TranslationHistory
         Save();
     }
 
+    /// <summary>選んだ英訳の記録をすべて消す (トレイの「学習データをリセット」)。</summary>
+    public void Clear()
+    {
+        _counts.Clear();
+        Save();
+    }
+
     private void Save()
     {
         if (_path is null) return;
@@ -141,7 +148,7 @@ public sealed class TranslationHistory
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var temp = _path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_counts));
+            File.WriteAllText(temp, JsonSerializer.Serialize(_counts, Config.LearningJsonContext.Default.Translations));
             File.Move(temp, _path, overwrite: true);
         }
         catch (Exception ex)
