@@ -24,6 +24,11 @@ on:
       - 'packaging/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 付ける予定のタグ (v1.2.1.2 など)。入れると、タグのときだけの版の確かめも行う (リリースは作らない)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -179,11 +184,15 @@ jobs:
           .\Build-Package.ps1 -Version $version
       # タグの版と、ビルドした Meltype.exe の版 (ProductVersion の + より前) が同じか。違うまま出すと、
       # 自動更新が「新しい版がある」と同じ版を取り直し続けるので、出さない。
+      # タグを付ける前に、手動実行の入力 tag で同じ確かめを試せる (gh workflow run build.yml --ref <branch> -f tag=v1.2.1.2)。
+      # shell は pwsh: Windows PowerShell 5.1 (powershell) は BOM の無いスクリプトの日本語を読み違えて構文エラーになる (v1.2.1.1)。
       - name: Check version matches tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: powershell
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          $expected = $env:GITHUB_REF_NAME.Substring(1)
+          $expected = $env:TAG -replace '^v', ''
           $actual = ((Get-Item -LiteralPath 'dist\Meltype\app\Meltype.exe').VersionInfo.ProductVersion -split '\+')[0]
           if ($actual -ne $expected) { throw "タグの版 ($expected) と Meltype.exe の版 ($actual) が違います。src\Meltype\Meltype.csproj の <Version> を合わせてください。" }
       # 検出・検査不能の配布物は、Artifacts にもリリースにも公開しない。
