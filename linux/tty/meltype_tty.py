@@ -181,6 +181,12 @@ SPECIAL = {13: 0x0D, 10: 0x0D, 9: 0x09, 32: 0x20, 127: 0x08, 8: 0x08, 27: 0x1B}
 SYMBOL = {ord(","): 0xBC, ord("."): 0xBE, ord("-"): 0xBD, ord("/"): 0xBF, ord("["): 0xDB, ord("]"): 0xDD}
 ARROWS = {b"A": 0x26, b"B": 0x28, b"C": 0x27, b"D": 0x25, b"H": 0x24, b"F": 0x23}
 FUNCTIONS = {17: 0x75, 18: 0x76, 19: 0x77, 20: 0x78, 21: 0x79}
+# Ctrl+U/I/P/O while composing: the Core's existing hiragana / katakana / full-width /
+# half-width switch (F6/F7/F9/F10). It takes the letter's virtual key with Control.
+CONTROL = 2  # meltype_handle_key modifiers: Shift = 1, Control = 2
+CTRL_CONVERT = {ord("u"): 0x55, ord("i"): 0x49, ord("p"): 0x50, ord("o"): 0x4F}
+# Legacy Ctrl bytes. 0x09 is also Tab, so Ctrl+I only counts when Kitty keys tell it apart.
+LEGACY_CTRL = {0x15: 0x55, 0x10: 0x50, 0x0F: 0x4F}
 PASTE_BEGIN = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
@@ -234,6 +240,9 @@ class InputBridge:
     def _key(self, code, original, shifted=False):
         if not self.capturing: return original
         if self.paused: return self._defer(original)
+        # Only while composing; otherwise the Ctrl byte keeps its meaning for the child.
+        if code in LEGACY_CTRL and self.view is not None:
+            return self._native_key(LEGACY_CTRL[code], 0, CONTROL, original)
         if 65 <= code <= 90:
             vk, char, shift = code, code, 1
         elif 97 <= code <= 122:
@@ -309,9 +318,11 @@ class InputBridge:
                 self.consumed_keys.discard(key_id)
                 return b""
             return raw
-        if modifiers < 0 or modifiers & ~193:
+        if code in CTRL_CONVERT and modifiers >= 0 and modifiers & ~192 == 4 and self.view is not None:
+            effect=self._native_key(CTRL_CONVERT[code], 0, CONTROL, raw)  # Ctrl alone, composing.
+        elif modifiers < 0 or modifiers & ~193:
             return self._passthrough(raw)  # Preserve Ctrl/Alt/Super command meanings.
-        if code is not None and (code in SPECIAL or 32 <= code < 127):
+        elif code is not None and (code in SPECIAL or 32 <= code < 127):
             effect=self._key(code, raw, bool(modifiers & 1) if caps_shift is None else caps_shift)
         elif vk is not None and self.view is not None:
             effect=self._native_key(vk, 0, modifiers & 1, raw)
