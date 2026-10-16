@@ -56,7 +56,8 @@ def run_case(expected, prefix, provider=None, release_provider=None):
             "os.write(1,b'SINK:'+v.hex().encode())")
         selection_path=Path(home)/'selection.jsonl'
         selection_fd=os.open(selection_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_APPEND,0o600)
-        args=[sys.executable,str(root/'meltype_tty.py'),'--raw-text','--native',str(pkg/'libMeltypeNative.so'),
+        # The composition mode: these cases prove preedit and candidate images from the first key.
+        args=[sys.executable,str(root/'meltype_tty.py'),'--raw-text','--compose','--native',str(pkg/'libMeltypeNative.so'),
             '--mozc',str(pkg/'mozc/meltype_mozc_helper'),'--font',font,
             '--selection-fd',str(selection_fd),'--',sys.executable,'-c',child]
         process=subprocess.Popen(args,stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True,pass_fds=(selection_fd,))

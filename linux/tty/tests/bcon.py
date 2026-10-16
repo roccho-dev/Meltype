@@ -72,10 +72,34 @@ def saved_editor(expected):
         "assert actual == expected, (actual, expected)")
     machine.wait_until_succeeds("python3 -c " + shlex.quote(code))
 
+# Default Direct Input (#16): keys reach Readline one at a time, so its Tab completion
+# works, and Ctrl+Space converts only the word typed after it.
+put("zz-direct-complete", "")
+reader = put("read-direct", "touch /run/meltype-proof/direct-ready\n"
+    "IFS= read -er -p 'DIRECT> ' value\nprintf %s \"$value\" > /run/meltype-proof/direct-text\n")
+launch("direct", "meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+machine.wait_until_succeeds("test -e /run/meltype-proof/direct-ready")
+before = scanout("B-direct-before")
+machine.send_chars("/run/meltype-proof/zz-direct-c")
+machine.send_key("tab")        # Readline completes the file name.
+time.sleep(.5)
+machine.send_chars("nihongo")
+time.sleep(.5)                 # Readline's echo comes back before the conversion key.
+machine.send_key("ctrl-spc")
+machine.send_chars(" ")        # Candidates, as in the composition scenarios.
+candidates("B-direct-candidates", before)
+machine.fail("test -e /run/meltype-proof/direct-text")
+machine.send_key("ret")        # Commit the conversion.
+machine.send_key("ret")        # Readline accepts its line.
+finished("direct")
+assert contents("direct-text") in ("/run/meltype-proof/zz-direct-complete 日本語",
+    "/run/meltype-proof/zz-direct-complete日本語"), contents("direct-text")
+
+# The composition mode (--compose): every key goes through Meltype from the first one.
 # A real shell's line editor, not a substitute conversion engine or CDP sink.
 reader = put("read-line", "printf 'READLINE_READY\\n'\ntouch /run/meltype-proof/readline-ready\n"
     "IFS= read -er -p 'INPUT> ' value\nprintf %s \"$value\" > /run/meltype-proof/shell-text\n")
-launch("shell", "meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+launch("shell", "meltype-tty --raw-text --compose -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/readline-ready")
 before = scanout("B-shell-before")
 machine.send_chars("hello nihongo ")
@@ -89,7 +113,7 @@ assert contents("shell-text") == "hello 日本語"
 
 # Real nano owns edits to already committed text and its native Undo/Redo.
 # Meltype owns preedit/reconversion only; no guessed deleteBefore/backspaces.
-launch("editor", "meltype-tty --raw-text -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
+launch("editor", "meltype-tty --raw-text --compose -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
 machine.wait_until_succeeds("pgrep -x nano")
 before = scanout("B-editor-before")
 machine.send_chars("nihongo ")
@@ -123,7 +147,7 @@ finished("editor")
 
 # Reopen the real Editor and cancel an uncommitted conversion. The previously
 # saved bytes must survive candidate display, cancellation and process restart.
-launch("editor-restart", "meltype-tty --raw-text -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
+launch("editor-restart", "meltype-tty --raw-text --compose -- nano --ignorerc --nonewlines /run/meltype-proof/editor-text")
 machine.wait_until_succeeds("pgrep -x nano")
 before = scanout("B-editor-restart-before")
 machine.send_chars("nihongo ")
@@ -154,7 +178,7 @@ HTTPServer(('127.0.0.1',8031),Handler).serve_forever()
 machine.succeed("systemd-run --unit=meltype-test-provider -- python3 " + provider)
 machine.wait_until_succeeds("ss -ltn | grep ':8031'")
 reader = put("read-typed", "touch /run/meltype-proof/typed-ready\nIFS= read -er -p 'TYPED> ' value\nprintf %s \"$value\" > /run/meltype-proof/typed-text\n")
-launch("typed", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+launch("typed", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text --compose -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/typed-ready")
 before = scanout("B-typed-before")
 machine.send_chars("u")
@@ -170,7 +194,7 @@ assert contents("typed-text") == "乙候補"
 requests_before = contents("provider-requests")
 reader = put("read-hidden", "stty -echo\n touch /run/meltype-proof/hidden-ready\n"
     "IFS= read -r value\nprintf %s \"$value\" > /run/meltype-proof/hidden-text\n")
-launch("hidden", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+launch("hidden", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal meltype-tty --raw-text --compose -- bash --noprofile --norc " + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/hidden-ready")
 hidden_before = scanout("B-hidden-before")
 machine.send_chars("not-a-real-password\n")
@@ -180,7 +204,7 @@ assert contents("provider-requests") == requests_before
 scanout("B-hidden-after")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
-    "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
+    "direct":contents("direct-text"),"shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
     "provider":"LOCAL_FIXTURE","physical_host":"NOT_RUN","independent_review":"NOT_RUN",

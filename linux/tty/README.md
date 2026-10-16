@@ -56,6 +56,22 @@ and PR #3. Physical-host, independent-review and provider evidence remain distin
 The first Enter consumes pending conversion; a later Enter can submit a shell
 line or insert an Editor newline. The tests check that these are not confused.
 
+## Direct Input (default)
+
+By default (fork #16, upstream #816) keys reach the child one at a time, so its
+Tab completion, history search and suggestions keep working. Ctrl+Space converts
+the ASCII word just typed (letters after the last space or symbol, upstream #679):
+meltype-tty sends that many BackSpaces (0x7f, what bcon's BackSpace key sends)
+and gives the same letters to the Core's composition; selection and commit are
+unchanged. Esc cancels the conversion and puts the word back.
+
+The word is remembered only while the child's echo shows exactly those keys.
+Tab, arrows, Enter, Ctrl keys, Esc, paste, a resize, focus or capture changes,
+or any other child output forget it; BackSpace takes back one letter once its
+echo is seen. When nothing is remembered, Ctrl+Space reaches the child (NUL).
+So a conversion never erases more than the keys it saw echoed. `--compose`
+restores the previous mode in which every key goes through a composition.
+
 While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
 hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
 committing. Ctrl+I (katakana) is included only when Kitty keys tell it apart;
@@ -76,7 +92,7 @@ claim about every later field in an arbitrary app. Canonical no-echo protection
 still applies. Unobserved application-caret changes remain outside that guarantee.
 
 Entry flags: `--native`, `--mozc`, an existing CJK `--font`, and optionally
-`--raw-text` for a known text app. `--transport-proof` is explicitly nonvisual and
+`--raw-text` for a known text app and `--compose` for the composition mode. `--transport-proof` is explicitly nonvisual and
 for testing, not normal use. Font files are not copied into this repository.
 
 ## Optional shared Proposal port

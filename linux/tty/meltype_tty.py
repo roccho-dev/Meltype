@@ -187,6 +187,15 @@ CONTROL = 2  # meltype_handle_key modifiers: Shift = 1, Control = 2
 CTRL_CONVERT = {ord("u"): 0x55, ord("i"): 0x49, ord("p"): 0x50, ord("o"): 0x4F}
 # Legacy Ctrl bytes. 0x09 is also Tab, so Ctrl+I only counts when Kitty keys tell it apart.
 LEGACY_CTRL = {0x15: 0x55, 0x10: 0x50, 0x0F: 0x4F}
+# Direct Input (the default): keys go to the child one at a time, so its completion and history keep
+# working. Ctrl+Space converts the ASCII word just typed: as many BackSpaces as its letters (0x7f, what
+# bcon's BackSpace key sends), then the same letters into the Core's composition (upstream #679).
+CONVERT_LEGACY = 0x00  # Ctrl+Space; Kitty CSI-u and modifyOtherKeys report Space (32) with Ctrl.
+ERASE = b"\x7f"
+# How a line editor echoes one BackSpace at the end of its line (Readline: "\b" then clear to end).
+ERASE_ECHOES = (b"\x08\x1b[K", b"\x08\x1b[0K", b"\x08 \x08")
+WORD = re.compile(rb"[A-Za-z][A-Za-z'-]*\Z")
+SHADOW_LIMIT = 256
 PASTE_BEGIN = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 
@@ -194,8 +203,14 @@ PASTE_END = b"\x1b[201~"
 class InputBridge:
     """One instance per child PTY. No global active-pane or IME state."""
 
-    def __init__(self, native):
+    def __init__(self, native, direct=False):
         self.native = native
+        self.direct = direct
+        self.shadow = bytearray()    # printable ASCII just typed in Direct Input, as the child has it
+        self.unechoed = bytearray()  # the part of it whose echo has not come back from the child yet
+        self.erasing = 0             # BackSpaces whose echo has not come back yet
+        self.source = None           # the word a conversion took back, until it is committed
+        self.outbox = bytearray()
         self.view = None
         self.escape = bytearray()
         self.paste = bytearray()
@@ -223,10 +238,15 @@ class InputBridge:
         allowed = self.capture_permitted and self.focused
         if allowed == self.capturing: return
         self.capturing = allowed
+        self.forget()
         focus = getattr(self.native, "focus", None)
         if focus is not None: focus(allowed)
         if not allowed:
-            if self.view is not None: self.native.cancel()
+            if self.view is not None:
+                self.native.cancel()
+                # A word taken back for conversion goes back as it was.
+                if self.source is not None: self.outbox.extend(self.source)
+            self.source = None
             self.view = None
             self.deferred.clear()
             self.consumed_keys.clear()
@@ -243,6 +263,61 @@ class InputBridge:
         # Only while composing; otherwise the Ctrl byte keeps its meaning for the child.
         if code in LEGACY_CTRL and self.view is not None:
             return self._native_key(LEGACY_CTRL[code], 0, CONTROL, original)
+        if self.direct and self.view is None:
+            return self._convert(original) if code == CONVERT_LEGACY else self._direct(code, original)
+        return self._compose(code, original, shifted)
+
+    def forget(self):
+        # Anything that may have moved the caret or rewritten the line: convert nothing rather than guess.
+        self.shadow.clear()
+        self.unechoed.clear()
+        self.erasing = 0
+
+    def _direct(self, code, original):
+        # The child gets the key as it is. Only a run of printable ASCII is remembered, and only while
+        # the child's echo shows exactly that run (see observe).
+        if code in (0x7F, 0x08) and self.shadow and not self.unechoed:
+            self.shadow.pop()
+            self.erasing += 1
+        elif 32 <= code < 127 and len(self.shadow) < SHADOW_LIMIT:
+            self.shadow.append(code)
+            self.unechoed.append(code)
+        else:
+            self.forget()
+        return original
+
+    def _convert(self, original):
+        self.source = None
+        match = WORD.search(self.shadow) if not self.unechoed and not self.erasing else None
+        self.forget()
+        if match is None: return original  # Nothing known to convert: the key stays the child's.
+        word = bytes(match[0])
+        out = bytearray(ERASE * len(word))
+        for code in word:
+            out.extend(self._compose(code, bytes([code])))
+        if self.view is not None: self.source = word
+        return bytes(out)
+
+    def observe(self, data):
+        """Child output. Only the echo of the remembered keys keeps them; anything else forgets them."""
+        index = 0
+        while index < len(data) and (self.unechoed or self.erasing):
+            if self.unechoed and data[index] == self.unechoed[0]:
+                del self.unechoed[0]
+                index += 1
+                continue
+            erase = next((e for e in ERASE_ECHOES if data.startswith(e, index)), None) if self.erasing else None
+            if erase is None: break
+            self.erasing -= 1
+            index += len(erase)
+        if index < len(data): self.forget()
+
+    def drain(self):
+        out = bytes(self.outbox)
+        self.outbox.clear()
+        return out
+
+    def _compose(self, code, original, shifted=False):
         if 65 <= code <= 90:
             vk, char, shift = code, code, 1
         elif 97 <= code <= 122:
@@ -264,6 +339,10 @@ class InputBridge:
         result = self.native.key(vk, char, modifiers)
         effect = effect_bytes(result, original)
         self.view = result.get("view")
+        if self.view is None and self.source is not None:
+            # Cancelled with Esc, nothing committed: the word taken back goes back as it was.
+            if vk == 0x1B and not result["commits"]: effect = self.source + effect
+            self.source = None
         return effect
 
     def _passthrough(self, raw):
@@ -272,7 +351,9 @@ class InputBridge:
         if self.view is not None:
             effect = effect_bytes(self.native.commit())
             self.view = None
+            self.source = None
             return effect + raw
+        self.forget()
         return raw
 
     def _sequence(self, raw):
@@ -320,6 +401,8 @@ class InputBridge:
             return raw
         if code in CTRL_CONVERT and modifiers >= 0 and modifiers & ~192 == 4 and self.view is not None:
             effect=self._native_key(CTRL_CONVERT[code], 0, CONTROL, raw)  # Ctrl alone, composing.
+        elif code == 32 and modifiers >= 0 and modifiers & ~192 == 4 and self.direct and self.view is None:
+            effect=self._convert(raw)  # Ctrl+Space in Direct Input.
         elif modifiers < 0 or modifiers & ~193:
             return self._passthrough(raw)  # Preserve Ctrl/Alt/Super command meanings.
         elif code is not None and (code in SPECIAL or 32 <= code < 127):
@@ -375,14 +458,14 @@ class InputBridge:
                 self.escape_started = time.monotonic()
             else:
                 out.extend(self._step(byte))
-        return bytes(out)
+        return bytes(out) + self.drain()
 
     def expire(self, now=None):
         now = time.monotonic() if now is None else now
         limit = .06 if self.escape == b"\x1b" else 1.5
         if self.escape and self.escape_started is not None and now - self.escape_started >= limit:
-            return self.flush_escape()
-        return b""
+            return self.flush_escape() + self.drain()
+        return self.drain()
 
     def flush_escape(self):
         if not self.escape:
@@ -475,7 +558,7 @@ def publish_selection(native, fd):
         raise UnsafeEffect("selection observation failed; input may have applied; no replay") from error
 
 
-def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None):
+def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None, direct=True):
     """Fork before NativeAOT, but exec only after initialization succeeds.
 
     The pipe gates only startup. No credentials, input replay, global daemon,
@@ -514,7 +597,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None)
         # this PTY master and must never inherit another input connection.
         os.set_inheritable(master, False)
         native = make_native()
-        bridge = InputBridge(native)
+        bridge = InputBridge(native, direct)
         bind = getattr(native, "bind_target", None)
         if bind is not None:
             stat = os.fstat(master)
@@ -547,6 +630,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None)
                     bridge.deferred.clear()
 
         def resize(*_):
+            bridge.forget()  # The child may redraw its line.
             _size_to_child(master)
             if display is not None:
                 size = os.get_terminal_size(0)
@@ -603,6 +687,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None)
                     break
                 if not data:
                     break
+                bridge.observe(data)
                 write_all(1, display.output(data) if display is not None else data)
                 refresh()
             if 0 in ready:
@@ -638,6 +723,7 @@ def main():
     parser.add_argument("--font", type=Path, help="existing CJK font for Kitty candidate images")
     parser.add_argument("--selection-fd", type=int, help="explicit append-only regular file descriptor for original selected proposals; not an effect receipt")
     parser.add_argument("--raw-text", action="store_true", help="authorize a known raw text application, not an unknown/password field")
+    parser.add_argument("--compose", action="store_true", help="every key goes through a composition (no Direct Input)")
     parser.add_argument("--transport-proof", action="store_true", help="explicit nonvisual test mode only")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -650,7 +736,8 @@ def main():
         return KittyDisplay(args.font, size.lines, size.columns)
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
                lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
-               make_display if args.font is not None else None, raw_text=args.raw_text, selection_fd=args.selection_fd)
+               make_display if args.font is not None else None, raw_text=args.raw_text, selection_fd=args.selection_fd,
+               direct=not args.compose)
 
 
 if __name__ == "__main__":
