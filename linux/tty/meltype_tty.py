@@ -288,10 +288,10 @@ class InputBridge:
 
     def _convert(self, original):
         self.source = None
-        match = WORD.search(self.shadow) if not self.unechoed and not self.erasing else None
+        match = WORD.search(bytes(self.shadow)) if not self.unechoed and not self.erasing else None
         self.forget()
         if match is None: return original  # Nothing known to convert: the key stays the child's.
-        word = bytes(match[0])
+        word = match[0]
         out = bytearray(ERASE * len(word))
         for code in word:
             out.extend(self._compose(code, bytes([code])))
