@@ -56,6 +56,12 @@ and PR #3. Physical-host, independent-review and provider evidence remain distin
 The first Enter consumes pending conversion; a later Enter can submit a shell
 line or insert an Editor newline. The tests check that these are not confused.
 
+While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
+hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
+committing. Ctrl+I (katakana) is included only when Kitty keys tell it apart;
+the legacy Ctrl+I byte is Tab. With no composition, every Ctrl key reaches the
+child unchanged, so Readline, vim and nano keep their Ctrl commands.
+
 ## Capture and privacy
 
 Canonical input with ECHO disabled bypasses conversion and Proposal lookup.

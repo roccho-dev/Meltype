@@ -101,6 +101,18 @@ class NativeProof(unittest.TestCase):
         self.assertEqual(self.bridge.view['text'], '日本語')
         self.assertEqual(self.send(b'\r'), '日本語'.encode())
 
+    def test_ctrl_uipo_switch_real_composition_without_writing(self):
+        # Windows Meltype's Ctrl+P/O/I/U: full-width, half-width, katakana, hiragana.
+        self.send(b'aiueo')
+        for raw,expected in [(b'\x10','ａｉｕｅｏ'),(b'\x0f','aiueo'),(b'\x1b[105;5u','アイウエオ'),(b'\x15','あいうえお')]:
+            self.assertEqual(self.send(raw), b'')
+            self.assertEqual(self.bridge.view['text'], expected)
+        self.assertEqual(self.send(b'\r'), 'あいうえお'.encode())
+
+    def test_ctrl_without_composition_reaches_child(self):
+        self.assertEqual(self.send(b'\x15\x10\x0f'), b'\x15\x10\x0f')
+        self.assertIsNone(self.bridge.view)
+
 if __name__=='__main__':
     names=unittest.defaultTestLoader.getTestCaseNames(NativeProof)
     if len(sys.argv)>1:
