@@ -109,6 +109,17 @@ class NativeProof(unittest.TestCase):
             self.assertEqual(self.bridge.view['text'], expected)
         self.assertEqual(self.send(b'\r'), 'あいうえお'.encode())
 
+    def test_direct_input_converts_only_the_word_just_typed(self):
+        # #16: keys reach the child at once; Ctrl+Space erases the echoed word and composes it.
+        self.bridge = m.InputBridge(self.native, direct=True)
+        self.assertEqual(self.send(b'hello nihongo'), b'hello nihongo')
+        self.bridge.observe(b'hello nihongo')  # The echo a line editor would print.
+        self.assertEqual(self.send(b'\x00'), b'\x7f'*7)
+        self.assertEqual(self.bridge.view['text'], '日本語')
+        self.assertEqual(self.send(b'\r'), '日本語'.encode())
+        self.assertIsNone(self.bridge.view)
+        self.assertEqual(self.send(b'ls'), b'ls')
+
     def test_ctrl_without_composition_reaches_child(self):
         self.assertEqual(self.send(b'\x15\x10\x0f'), b'\x15\x10\x0f')
         self.assertIsNone(self.bridge.view)
