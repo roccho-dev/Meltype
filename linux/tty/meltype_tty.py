@@ -338,6 +338,10 @@ class InputBridge:
             self.forget()
         return original
 
+    def echo_pending(self):
+        """Typed keys in Direct Input whose echo the child has not shown yet: the line is about to change."""
+        return self.direct and self.view is None and self.capturing and bool(self.unechoed or self.erasing)
+
     def word(self):
         """The ASCII word just typed in Direct Input whose echo the child has shown, or None."""
         if not self.direct or self.view is not None or not self.capturing or self.unechoed or self.erasing:
@@ -557,6 +561,9 @@ class Preview:
         self.lock = threading.Lock()
 
     def update(self, bridge, now):
+        # Between a key and its echo the screen still shows the previous line: keep what is shown.
+        # (run() refreshes right after sending each key; treating that moment as "no word" hid the preview.)
+        if bridge.echo_pending(): return self.view
         word = bridge.word()
         if word is not None and len(word) > self.longest: word = None
         if word != self.word:
