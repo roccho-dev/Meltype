@@ -291,6 +291,27 @@ class Persistence(unittest.TestCase):
         out=self.d.output(key,moved);self.log.note(self.d,self.p,'child output')
         return out
 
+    def refresh(self,now):
+        self.d.update(self.p.update(self.b,now),passive=True);self.log.note(self.d,self.p,'update')
+
+    def test_a_refresh_between_a_key_and_its_echo_keeps_the_preview(self):
+        # run() refreshes right after sending each key, before the child echoes it (bcon VM, run 39022446603:
+        # 'h' was hidden with reason "update" and redrawn one column to the right).
+        self.show(1)
+        t=2
+        for key,echo in [(b'o',b'o'),(b'\x7f',b'\x08\x1b[K')]:
+            self.assertEqual(self.b.feed(key),key)
+            self.refresh(t);t+=1                       # the key is out, its echo not back yet
+            self.assertTrue(self.d.visible,key)
+            self.d.output(echo,self.b.observe(echo));self.log.note(self.d,self.p,'child output')
+            self.refresh(t);t+=1
+            if self.p.thread is not None: self.p.thread.join(5)
+            self.refresh(t);t+=1
+        events=self.events()
+        self.assertEqual([e for e in events if e['event']=='hide'],[])
+        self.assertEqual(len({e['rect'][1] for e in events}),1)
+        self.assertEqual((events[-1]['input'],events[-1]['stale']),('nihong',False))
+
     def test_observe_reports_how_far_an_echo_moved_the_cursor(self):
         n=Native();b=m.InputBridge(n,direct=True)
         b.feed(b'ab');self.assertEqual(b.observe(b'ab'),2)
