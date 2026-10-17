@@ -167,6 +167,13 @@ class NativeSession:
                 key = virtual_key(code)
                 if key is None: return None
                 view = self._result(self.lib.meltype_handle_key(self.preview_session, *key, None, None)).get("view")
+            # The composition alone is only what Mozc already converted while typing (nihonn stays にほん).
+            # A Japanese composition is also converted (Space) for its candidates; an English one is not,
+            # since Space would commit it. The Esc below cancels either, so nothing is committed or learned.
+            text = (view or {}).get("text") or ""
+            if any(ord(ch) > 0x7F for ch in text):
+                converted = self._result(self.lib.meltype_handle_key(self.preview_session, 0x20, 0x20, 0, None, None)).get("view")
+                if converted and converted.get("candidates"): view = converted
             return view
         finally:
             for _ in range(3):

@@ -215,6 +215,27 @@ class NativeProof(unittest.TestCase):
                            'committed': self.send(b'\r').decode()}
         print(json.dumps({'trailing_nn': found}, ensure_ascii=False), flush=True)
 
+    def test_preview_offers_conversion_candidates_for_a_trailing_nn(self):
+        # #19 P19f: the composition of nihonn is only にほん; the preview must carry the conversion (kanji).
+        kanji = lambda text: any(chr(0x4e00) <= ch <= chr(0x9fff) for ch in text)
+        propose = m.core_proposals(self.native)
+        for word in ['nihonn', 'nihonngo']:
+            shown = [p['representation'] for p in propose(self.query(word))][:m.Preview(propose).limit]
+            print(json.dumps({'preview': word, 'representations': shown}, ensure_ascii=False), flush=True)
+            self.assertTrue(any(kanji(text) for text in shown), (word, shown))
+
+    def test_ctrl_space_then_space_reaches_kanji_for_nihonn(self):
+        # Unchanged path, checked only: Ctrl+Space composes にほん, Space converts it to kanji candidates.
+        self.bridge = m.InputBridge(self.native, direct=True)
+        self.assertEqual(self.send(b'nihonn'), b'nihonn')
+        self.bridge.observe(b'nihonn')
+        self.assertEqual(self.send(b'\x00'), b'\x7f' * 6)
+        self.assertEqual(self.bridge.view['text'], 'にほん')
+        self.assertEqual(self.send(b' '), b'')
+        candidates = self.bridge.view['candidates']
+        print(json.dumps({'ctrl_space_nihonn_candidates': candidates[:5]}, ensure_ascii=False), flush=True)
+        self.assertIn('日本', candidates)
+
     def test_preview_query_time_is_measured_and_bounded(self):
         propose = m.core_proposals(self.native)
         for word in ['nihongo', 'nihongo' * 4 + 'niho']:  # The longest word a preview asks for: 32 letters.
