@@ -199,6 +199,70 @@ class NativeProof(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.check_no_learning(self.broken_sources()['commits'])
 
+    def test_record_what_the_core_gives_for_a_trailing_nn(self):
+        # #19 P19e: the Core's answer for "nihon" / "nihonn" / "nihonngo", as the preview and Ctrl+Space
+        # get it. Recorded here (the Core is the same in 1.2.1.6 and 1.2.1.7); the bcon VM judges.
+        found = {}
+        for word in ['nihon', 'nihonn', 'nihonngo']:
+            self.tearDown(); self.setUp()
+            preview = [p['representation'] for p in m.core_proposals(self.native)(self.query(word))]
+            self.bridge = m.InputBridge(self.native, direct=True)
+            self.assertEqual(self.send(word.encode()), word.encode())
+            self.bridge.observe(word.encode())  # the echo a line editor would print
+            self.assertEqual(self.send(b'\x00'), b'\x7f' * len(word))
+            view = dict(self.bridge.view or {})
+            found[word] = {'preview': preview, 'composition': view.get('text'), 'candidates': view.get('candidates'),
+                           'committed': self.send(b'\r').decode()}
+        print(json.dumps({'trailing_nn': found}, ensure_ascii=False), flush=True)
+
+    def test_preview_offers_conversion_candidates_for_a_trailing_nn(self):
+        # #19 P19f: the composition of nihonn is only にほん; the preview must carry the conversion (kanji).
+        kanji = lambda text: any(chr(0x4e00) <= ch <= chr(0x9fff) for ch in text)
+        propose = m.core_proposals(self.native)
+        for word in ['nihonn', 'nihonngo']:
+            shown = [p['representation'] for p in propose(self.query(word))][:m.Preview(propose).limit]
+            print(json.dumps({'preview': word, 'representations': shown}, ensure_ascii=False), flush=True)
+            self.assertTrue(any(kanji(text) for text in shown), (word, shown))
+
+    def typed_direct(self, word):
+        self.bridge = m.InputBridge(self.native, direct=True)
+        self.assertEqual(self.send(word), word)
+        self.bridge.observe(word)  # the echo a line editor would print
+
+    def test_ctrl_space_converts_nihonn_to_the_previews_first_candidate(self):
+        # #19 P19g: Ctrl+Space converts at once; Enter commits 日本, the preview's first candidate.
+        first = m.core_proposals(self.native)(self.query('nihonn'))[0]['representation']
+        self.typed_direct(b'nihonn')
+        self.assertEqual(self.send(b'\x00'), b'\x7f' * 6)
+        print(json.dumps({'ctrl_space_nihonn': self.bridge.view.get('text'),
+                          'candidates': (self.bridge.view.get('candidates') or [])[:5]}, ensure_ascii=False), flush=True)
+        self.assertEqual(self.bridge.view['text'], first)
+        self.assertEqual(self.send(b'\r'), '日本'.encode())
+        self.assertIsNone(self.bridge.view)
+
+    def test_ctrl_space_keeps_nihongo_kanji(self):
+        self.typed_direct(b'nihongo')
+        self.assertEqual(self.send(b'\x00'), b'\x7f' * 7)
+        self.assertEqual(self.send(b'\r'), '日本語'.encode())
+
+    def test_esc_after_ctrl_space_puts_nihonn_back(self):
+        self.typed_direct(b'nihonn')
+        self.send(b'\x00')
+        effects = []
+        for _ in range(2):  # conversion, then composition
+            self.assertEqual(self.send(b'\x1b'), b'')
+            effects.append(self.bridge.flush_escape())
+        self.assertEqual(effects, [b'', b'nihonn'])
+        self.assertIsNone(self.bridge.view)
+
+    def test_ctrl_u_and_p_still_switch_after_ctrl_space(self):
+        self.typed_direct(b'nihonn')
+        self.send(b'\x00')
+        self.assertEqual(self.send(b'\x15'), b'')
+        self.assertEqual(self.bridge.view['text'], 'にほん')
+        self.assertEqual(self.send(b'\x10'), b'')
+        self.assertEqual(self.bridge.view['text'], 'ｎｉｈｏｎｎ')
+
     def test_preview_query_time_is_measured_and_bounded(self):
         propose = m.core_proposals(self.native)
         for word in ['nihongo', 'nihongo' * 4 + 'niho']:  # The longest word a preview asks for: 32 letters.

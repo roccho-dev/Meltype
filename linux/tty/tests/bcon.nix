@@ -19,7 +19,7 @@ let
   '';
 in pkgs.testers.runNixOSTest {
   name = "meltype-direct-input-bcon";
-  globalTimeout = 360;
+  globalTimeout = 480;
   extraPythonPackages = p: [ p.pillow ];
   nodes.machine = { ... }: {
     virtualisation.memorySize = 2048;
