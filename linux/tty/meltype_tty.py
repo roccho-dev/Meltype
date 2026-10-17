@@ -364,6 +364,10 @@ class InputBridge:
         out = bytearray(ERASE * len(word))
         for code in word:
             out.extend(self._compose(code, bytes([code])))
+        # Ctrl+Space converts (#19): a Japanese composition goes on to its conversion (Space), whose first
+        # candidate is the preview's first. An English one stays composed (Space would commit it).
+        if self.view is not None and any(ord(ch) > 0x7F for ch in str(self.view.get("text") or "")):
+            out.extend(self._compose(0x20, b" "))
         if self.view is not None: self.source = word
         return bytes(out)
 

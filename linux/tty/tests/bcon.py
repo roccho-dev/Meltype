@@ -85,8 +85,7 @@ machine.send_key("tab")        # Readline completes the file name.
 time.sleep(.5)
 machine.send_chars("nihongo")
 time.sleep(.5)                 # Readline's echo comes back before the conversion key.
-machine.send_key("ctrl-spc")
-machine.send_chars(" ")        # Candidates, as in the composition scenarios.
+machine.send_key("ctrl-spc")   # Converts at once (#19 P19g): the candidate image is up.
 candidates("B-direct-candidates", before)
 machine.fail("test -e /run/meltype-proof/direct-text")
 machine.send_key("ret")        # Commit the conversion.
@@ -279,13 +278,27 @@ for word in ["nihonn", "nihon"]:
     time.sleep(.5)
     diagnosis[word] = {"keys": keys, "events": events, "settled_panel": new_boxes(settled, before)[0],
                        "converted": contents(f"diag-{word}").strip()}
+# Esc twice (conversion, then composition) puts the typed letters back: nothing erased for good.
+machine.send_chars("echo nihonn")
+time.sleep(1)
+machine.send_key("ctrl-spc")
+time.sleep(1)
+for _ in range(2):
+    machine.send_key("esc")
+    time.sleep(.3)                           # separate standalone Esc keys from an Alt chord
+machine.send_chars(" > /run/meltype-proof/diag-esc\n")
+machine.wait_until_succeeds("test -e /run/meltype-proof/diag-esc")
+time.sleep(.5)
+diagnosis["esc"] = contents("diag-esc").strip()
 machine.send_chars("exit\n")
 finished("diag")
 print("DIAG-P19E " + json.dumps(diagnosis, ensure_ascii=False), flush=True)
 got = diagnosis["nihonn"]
 fresh = [e for e in got["events"] if e["event"] in ("show", "update") and not e.get("stale") and e.get("input") == "nihonn"]
 assert fresh and any(has_kanji(r) for r in fresh[-1]["representations"]), ("nihonn: no kanji preview", got)
-assert has_kanji(got["converted"]), ("nihonn: Ctrl+Space did not convert to kanji", got)
+assert got["converted"] == "日本", ("nihonn: Ctrl+Space + Enter is not 日本", got)
+assert got["converted"] == fresh[-1]["representations"][0], ("Ctrl+Space differs from the preview's first", got)
+assert diagnosis["esc"] == "nihonn", ("Esc did not put nihonn back", diagnosis["esc"])
 
 machine.succeed("touch /run/meltype-proof/nihongo-a /run/meltype-proof/nihongo-b")
 launch("preview", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
@@ -314,8 +327,7 @@ shown = scanout("B-preview-shown")
 panel, text = new_boxes(shown, before)
 assert panel is not None and text is not None, (panel, text)
 assert panel[3] <= text[1], ("the preview covers the line bash echoed", panel, text)
-machine.send_key("ctrl-spc")                # Adoption: the same conversion as #16.
-machine.send_chars(" ")
+machine.send_key("ctrl-spc")                # Adoption: Ctrl+Space converts to the preview's first candidate.
 machine.send_key("ret")
 machine.send_chars(" > /run/meltype-proof/preview-conv\n")
 machine.wait_until_succeeds("test -s /run/meltype-proof/preview-conv")

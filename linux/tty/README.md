@@ -62,8 +62,11 @@ By default (fork #16, upstream #816) keys reach the child one at a time, so its
 Tab completion, history search and suggestions keep working. Ctrl+Space converts
 the ASCII word just typed (letters after the last space or symbol, upstream #679):
 meltype-tty sends that many BackSpaces (0x7f, what bcon's BackSpace key sends)
-and gives the same letters to the Core's composition; selection and commit are
-unchanged. Esc cancels the conversion and puts the word back.
+and gives the same letters to the Core's composition. A Japanese composition is
+then converted (Space) at once, so its first candidate (nihonn: 日本) is the one
+`--preview` showed first and Enter commits it; an English one stays composed.
+Selection, Ctrl+U/I/O/P and commit are unchanged. Esc (twice from a conversion)
+cancels and puts the word back.
 
 The word is remembered only while the child's echo shows exactly those keys.
 Tab, arrows, Enter, Ctrl keys, Esc, paste, a resize, focus or capture changes,

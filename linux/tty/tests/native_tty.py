@@ -224,17 +224,44 @@ class NativeProof(unittest.TestCase):
             print(json.dumps({'preview': word, 'representations': shown}, ensure_ascii=False), flush=True)
             self.assertTrue(any(kanji(text) for text in shown), (word, shown))
 
-    def test_ctrl_space_then_space_reaches_kanji_for_nihonn(self):
-        # Unchanged path, checked only: Ctrl+Space composes にほん, Space converts it to kanji candidates.
+    def typed_direct(self, word):
         self.bridge = m.InputBridge(self.native, direct=True)
-        self.assertEqual(self.send(b'nihonn'), b'nihonn')
-        self.bridge.observe(b'nihonn')
+        self.assertEqual(self.send(word), word)
+        self.bridge.observe(word)  # the echo a line editor would print
+
+    def test_ctrl_space_converts_nihonn_to_the_previews_first_candidate(self):
+        # #19 P19g: Ctrl+Space converts at once; Enter commits 日本, the preview's first candidate.
+        first = m.core_proposals(self.native)(self.query('nihonn'))[0]['representation']
+        self.typed_direct(b'nihonn')
         self.assertEqual(self.send(b'\x00'), b'\x7f' * 6)
+        print(json.dumps({'ctrl_space_nihonn': self.bridge.view.get('text'),
+                          'candidates': (self.bridge.view.get('candidates') or [])[:5]}, ensure_ascii=False), flush=True)
+        self.assertEqual(self.bridge.view['text'], first)
+        self.assertEqual(self.send(b'\r'), '日本'.encode())
+        self.assertIsNone(self.bridge.view)
+
+    def test_ctrl_space_keeps_nihongo_kanji(self):
+        self.typed_direct(b'nihongo')
+        self.assertEqual(self.send(b'\x00'), b'\x7f' * 7)
+        self.assertEqual(self.send(b'\r'), '日本語'.encode())
+
+    def test_esc_after_ctrl_space_puts_nihonn_back(self):
+        self.typed_direct(b'nihonn')
+        self.send(b'\x00')
+        effects = []
+        for _ in range(2):  # conversion, then composition
+            self.assertEqual(self.send(b'\x1b'), b'')
+            effects.append(self.bridge.flush_escape())
+        self.assertEqual(effects, [b'', b'nihonn'])
+        self.assertIsNone(self.bridge.view)
+
+    def test_ctrl_u_and_p_still_switch_after_ctrl_space(self):
+        self.typed_direct(b'nihonn')
+        self.send(b'\x00')
+        self.assertEqual(self.send(b'\x15'), b'')
         self.assertEqual(self.bridge.view['text'], 'にほん')
-        self.assertEqual(self.send(b' '), b'')
-        candidates = self.bridge.view['candidates']
-        print(json.dumps({'ctrl_space_nihonn_candidates': candidates[:5]}, ensure_ascii=False), flush=True)
-        self.assertIn('日本', candidates)
+        self.assertEqual(self.send(b'\x10'), b'')
+        self.assertEqual(self.bridge.view['text'], 'ｎｉｈｏｎｎ')
 
     def test_preview_query_time_is_measured_and_bounded(self):
         propose = m.core_proposals(self.native)
