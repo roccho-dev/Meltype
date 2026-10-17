@@ -25,6 +25,7 @@ import tty
 import time
 import errno
 import re
+import threading
 from collections import deque
 from pathlib import Path
 
@@ -62,6 +63,9 @@ class NativeSession:
         # edits. Expect metadata alone is not proof of the child editor's text.
         self.lib.meltype_set_can_delete(self.session, 0)
         self.preview_session = None
+        # The preview thread (#19) and the input path share the Core's Mozc: one call at a time.
+        # Direct Input keys never call the Core, so they never wait for this lock.
+        self.lock = threading.RLock()
         self.proposal = None
         self.transport = None
         self.target = ""
@@ -98,17 +102,19 @@ class NativeSession:
 
     def poll_proposals(self):
         if not self.proposal: return None
-        pointer = self.lib.meltype_proposals_request(self.proposal)
-        if pointer: self.transport.submit(self._result(pointer))
-        response = self.transport.take()
-        if response is None: return None
-        generation, text = response
-        return self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode()))
+        with self.lock:
+            pointer = self.lib.meltype_proposals_request(self.proposal)
+            if pointer: self.transport.submit(self._result(pointer))
+            response = self.transport.take()
+            if response is None: return None
+            generation, text = response
+            return self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode()))
 
     def take_selection(self):
         if not self.proposal: return None
-        pointer = self.lib.meltype_proposals_selected(self.proposal)
-        return self._result(pointer) if pointer else None
+        with self.lock:
+            pointer = self.lib.meltype_proposals_selected(self.proposal)
+            return self._result(pointer) if pointer else None
 
     def _result(self, pointer):
         if not pointer:
@@ -133,15 +139,21 @@ class NativeSession:
         # Native cancels the candidate generation; cancel its queued acquisition
         # too. A request already sent cannot be recalled, only made inert.
         if vk == 0x1B and self.transport is not None: self.transport.cancel()
-        result = self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
+        with self.lock:
+            result = self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
         if result.get("view") is None and self.transport is not None: self.transport.cancel()
         return result
 
     def commit(self):
         if self.transport is not None: self.transport.cancel()
-        return self._result(self.lib.meltype_commit(self.session))
+        with self.lock:
+            return self._result(self.lib.meltype_commit(self.session))
 
     def preview(self, word):
+        with self.lock:
+            return self._preview(word) if self.session else None
+
+    def _preview(self, word):
         """The Core's view for an ASCII word, from a second session: the typing session is untouched,
         and the composition is always cancelled, so nothing is committed or learned."""
         if not self.preview_session:
@@ -164,9 +176,13 @@ class NativeSession:
                 self.preview_session = None
 
     def close(self):
-        if self.preview_session:
-            self.lib.meltype_destroy(self.preview_session)
-            self.preview_session = None
+        with self.lock:  # Waits for a preview query in flight; later ones see no session.
+            if self.preview_session:
+                self.lib.meltype_destroy(self.preview_session)
+                self.preview_session = None
+            self._close()
+
+    def _close(self):
         if self.transport is not None:
             self.transport.close()
             self.transport = None
@@ -513,34 +529,89 @@ class Preview:
     """#19: passive suggestions for the word Direct Input remembers. It never handles a key or writes to
     the child; Ctrl+Space stays the only way to use them. The source is one replaceable callable in
     semcmp's shape (roccho-org/ops#479): propose({input, state, focus}) -> [{id, representation,
-    meaning, evidence}]. It is asked once per word, after the word has stayed the same for `delay`."""
+    meaning, evidence}].
 
-    def __init__(self, propose, delay=.15, limit=5):
+    Bounds: update() runs on the input path and never calls the source, so a key is never held by it.
+    The source runs on its own thread, one query at a time, once per word that has stayed the same for
+    `delay` and has at most `longest` letters. An answer later than `timeout`, or for an older word, is
+    dropped, so a suggestion is shown within delay + timeout of the last key or not at all."""
+
+    def __init__(self, propose, delay=.15, timeout=.5, longest=32, limit=5):
         self.propose = propose
         self.delay = delay
+        self.timeout = timeout
+        self.longest = longest
         self.limit = limit
         self.word = None
         self.since = None
         self.asked = False
         self.view = None
+        self.thread = None
+        self.answer = None
+        self.lock = threading.Lock()
 
     def update(self, bridge, now):
         word = bridge.word()
+        if word is not None and len(word) > self.longest: word = None
         if word != self.word:
             self.word, self.since, self.asked, self.view = word, now, False, None
-        if word is None or self.asked or now - self.since < self.delay: return self.view
-        self.asked = True
-        text = word.decode("ascii")
-        query = {"input": text, "state": {"surface": "terminal"}, "focus": {"span": "word before the caret"}}
+        with self.lock:
+            answer, self.answer = self.answer, None
+        if answer is not None:
+            asked, seconds, proposals = answer
+            if asked == word and seconds <= self.timeout and proposals:
+                self.view = {"text": word.decode("ascii"), "candidates": [p["representation"] for p in proposals],
+                             "selectedIndex": -1, "hint": "Ctrl+Space: convert", "proposals": proposals}
+        busy = self.thread is not None and self.thread.is_alive()
+        if word is not None and not self.asked and not busy and now - self.since >= self.delay:
+            self.asked = True
+            self.thread = threading.Thread(target=self._ask, args=(word,), daemon=True)
+            self.thread.start()
+        return self.view
+
+    def _ask(self, word):
+        started = time.monotonic()
+        query = {"input": word.decode("ascii"), "state": {"surface": "terminal"}, "focus": {"span": "word before the caret"}}
         try:
             proposals = [p for p in self.propose(query) if isinstance(p, dict) and isinstance(p.get("id"), str)
                          and p["id"] and isinstance(p.get("representation"), str) and p["representation"]][:self.limit]
         except Exception:
             proposals = []  # A preview never stops typing.
-        if proposals:
-            self.view = {"text": text, "candidates": [p["representation"] for p in proposals], "selectedIndex": -1,
-                         "hint": "Ctrl+Space: convert", "proposals": proposals}
-        return self.view
+        with self.lock:
+            self.answer = (word, time.monotonic() - started, proposals)
+
+
+class PreviewLog:
+    """--preview-fd: an explicit append-only file of what the preview showed and hid (content, cells,
+    cursor) and why previews were turned off. Off by default; it holds the previewed word, so it is
+    for tests and diagnosis on a chosen machine, like --selection-fd."""
+
+    def __init__(self, fd):
+        self.fd = fd
+        self.shown = None
+        self.off = None
+
+    def note(self, display, previewer, reason):
+        if self.fd is None: return
+        events = []
+        if display.preview_off and display.preview_off != self.off:
+            self.off = display.preview_off
+            events.append({"event": "off", "reason": self.off})
+        placed = display.placed if display.visible and display.visible_passive else None
+        if placed != self.shown:
+            if placed is None:
+                events.append({"event": "hide", "reason": reason})
+            else:
+                view = previewer.view or {}
+                events.append({"event": "show", "input": view.get("text"),
+                               "ids": [p["id"] for p in view.get("proposals", [])],
+                               "representations": list(view.get("candidates", [])),
+                               "rect": list(placed), "cursor": list(display.cursor)})
+            self.shown = placed
+        try:
+            for event in events: write_all(self.fd, (json.dumps(event, ensure_ascii=False) + "\n").encode())
+        except (OSError, UnsafeEffect):
+            self.fd = None  # Observation never stops typing.
 
 
 def core_proposals(native):
@@ -638,7 +709,8 @@ def publish_selection(native, fd):
         raise UnsafeEffect("selection observation failed; input may have applied; no replay") from error
 
 
-def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None, direct=True, preview=False):
+def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None, direct=True, preview=False,
+        preview_fd=None):
     """Fork before NativeAOT, but exec only after initialization succeeds.
 
     The pipe gates only startup. No credentials, input replay, global daemon,
@@ -647,6 +719,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
     if not os.isatty(0) or not os.isatty(1):
         raise UnsafeEffect("requires an interactive TTY")
     validate_selection_fd(selection_fd)
+    validate_selection_fd(preview_fd)
     original = termios.tcgetattr(0)
     reader, writer = os.pipe()
     try:
@@ -658,6 +731,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
     if pid == 0:
         try:
             if selection_fd is not None: os.close(selection_fd)
+            if preview_fd is not None: os.close(preview_fd)
             os.close(writer)
             if os.read(reader, 1) != b"1":
                 os._exit(125)
@@ -686,6 +760,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             display = make_display()
             bridge.on_report = display.reply
         previewer = Preview(core_proposals(native)) if preview and display is not None and direct else None
+        preview_log = PreviewLog(preview_fd if previewer is not None else None)
 
         def refresh():
             poll = getattr(native, "poll_proposals", None)
@@ -696,8 +771,10 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             if display is None: return
             if bridge.view is None and previewer is not None:
                 write_all(1, display.update(previewer.update(bridge, time.monotonic()), passive=True))
+                preview_log.note(display, previewer, "update")
             else:
                 write_all(1, display.update(bridge.view))
+                if previewer is not None: preview_log.note(display, previewer, "composition")
             bridge.paused = bool(bridge.view is not None and (display.cursor is None or not display.boundary.safe))
 
         def accept(data):
@@ -773,6 +850,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                     break
                 bridge.observe(data)
                 write_all(1, display.output(data) if display is not None else data)
+                if previewer is not None: preview_log.note(display, previewer, "child output")
                 refresh()
             if 0 in ready:
                 data = os.read(0, 4096)
@@ -809,6 +887,7 @@ def main():
     parser.add_argument("--raw-text", action="store_true", help="authorize a known raw text application, not an unknown/password field")
     parser.add_argument("--compose", action="store_true", help="every key goes through a composition (no Direct Input)")
     parser.add_argument("--preview", action="store_true", help="show suggestions for the word just typed in Direct Input (#19)")
+    parser.add_argument("--preview-fd", type=int, help="explicit append-only regular file descriptor for what --preview showed; holds the previewed word")
     parser.add_argument("--transport-proof", action="store_true", help="explicit nonvisual test mode only")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -822,7 +901,7 @@ def main():
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
                lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
                make_display if args.font is not None else None, raw_text=args.raw_text, selection_fd=args.selection_fd,
-               direct=not args.compose, preview=args.preview)
+               direct=not args.compose, preview=args.preview, preview_fd=args.preview_fd)
 
 
 if __name__ == "__main__":

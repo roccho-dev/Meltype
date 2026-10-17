@@ -74,15 +74,22 @@ restores the previous mode in which every key goes through a composition.
 
 `--preview` (off by default, #19) also shows suggestions for that remembered
 word while typing continues: it takes no key and writes nothing to the child.
-They are asked once per word, after it has stayed the same for 150 ms, from one
-replaceable source in semcmp's shape (roccho-org/ops#479: `propose({input,
-state, focus})` returning `{id, representation, meaning, evidence}`). The first
-source is the Core's own conversion in a second native session, always
-cancelled, so the typing session is untouched and nothing is learned. The
-image is drawn only above the cursor line, never on it or below where the shell
-edits and lists completions, and it is removed before any child output is
-shown. Ctrl+Space still converts as above; a late cursor reply or an unusual
-terminal mode turns previews off rather than stopping input.
+They come from one replaceable source in semcmp's shape (roccho-org/ops#479:
+`propose({input, state, focus})` returning `{id, representation, meaning,
+evidence}`), run on its own thread so that no key waits for it: one query at a
+time, once per word of at most 32 letters that has stayed the same for 150 ms.
+An answer later than 0.5 s, or for an older word, is dropped. The first source
+is the Core's own conversion in a second native session, always cancelled, so
+the typing session is untouched and nothing is committed or learned; Core calls
+are serialized, so only Ctrl+Space (which calls the Core) can wait for a query
+in flight. The image is drawn only above the cursor line, never on it or below
+where the shell edits and lists completions, and it is removed before any child
+output is shown. A late or out-of-range cursor reply, or an unusual terminal
+mode, turns previews off (the reason is kept) rather than stopping input.
+Without `--preview` nothing differs from 1.2.1.5: in particular the candidate
+image never draws the Core's own key hint. `--preview-fd` explicitly records,
+in an append-only file, what was shown, where, and when it was hidden; it holds
+the previewed word and is off by default, like `--selection-fd`.
 
 While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
 hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
@@ -105,7 +112,7 @@ still applies. Unobserved application-caret changes remain outside that guarante
 
 Entry flags: `--native`, `--mozc`, an existing CJK `--font`, and optionally
 `--raw-text` for a known text app, `--compose` for the composition mode and
-`--preview` for #19's suggestions. `--transport-proof` is explicitly nonvisual and
+`--preview` (with `--preview-fd`) for #19's suggestions. `--transport-proof` is explicitly nonvisual and
 for testing, not normal use. Font files are not copied into this repository.
 
 ## Optional shared Proposal port
