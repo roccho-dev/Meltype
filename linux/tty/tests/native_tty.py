@@ -120,6 +120,94 @@ class NativeProof(unittest.TestCase):
         self.assertIsNone(self.bridge.view)
         self.assertEqual(self.send(b'ls'), b'ls')
 
+    # #19: the Core's suggestions come from a second session that is always cancelled.
+    def query(self, word):
+        return {'input': word, 'state': {}, 'focus': {}}
+
+    def check_source(self, propose):
+        """Right candidates, the same each time, and the typing session's composition untouched."""
+        self.send(b'nihongo')
+        first, second = propose(self.query('nihongo')), propose(self.query('nihongo'))
+        self.assertTrue(first, 'no candidates')
+        self.assertEqual(first[0]['representation'], '日本語')
+        self.assertEqual(set(first[0]), {'id', 'representation', 'meaning', 'evidence'})
+        self.assertEqual([p['representation'] for p in second], [p['representation'] for p in first])
+        self.assertEqual(self.bridge.view['text'], '日本語')
+        self.assertEqual(self.send(b'\r'), '日本語'.encode())
+        self.assertIsNone(self.bridge.view)
+
+    def check_no_learning(self, propose):
+        """No preview result commits anything, and a later conversion is ranked exactly as before."""
+        def candidates():
+            self.send(b'kawa ')
+            shown = list(self.bridge.view['candidates'])
+            for _ in range(2):
+                self.send(b'\x1b')
+                self.assertEqual(self.bridge.flush_escape(), b'')
+            self.assertIsNone(self.bridge.view)
+            return shown
+        before = candidates()
+        results, original = [], self.native._result
+        def spy(pointer):
+            result = original(pointer); results.append(result); return result
+        self.native._result = spy
+        try:
+            for _ in range(3): propose(self.query('kawa'))
+        finally:
+            self.native._result = original
+        self.assertTrue(results)
+        self.assertFalse([r for r in results if r.get('commits')], 'a preview committed text')
+        self.assertEqual(candidates(), before)
+
+    def broken_sources(self):
+        """Deliberately broken sources: the checks above must fail on each of them."""
+        lib, native = self.native.lib, self.native
+        def handle(vk, char=0, shift=0):
+            if not native.preview_session:
+                native.preview_session = lib.meltype_create()
+                lib.meltype_set_direct(native.preview_session, 0)
+                lib.meltype_set_can_delete(native.preview_session, 0)
+            return native._result(lib.meltype_handle_key(native.preview_session, vk, char, shift, None, None))
+        def compose(word):
+            view = None
+            for code in word.encode(): view = handle(*m.virtual_key(code)).get('view')
+            return view
+        def proposals(view):
+            return [{'id': 'b', 'representation': view['text'], 'meaning': {}, 'evidence': []}] if view else []
+        def no_candidates(query): return []
+        def no_cancel(query): return proposals(compose(query['input']))
+        def commits(query):
+            view = compose(query['input'])
+            handle(0x20, 0x20); handle(0x28); handle(0x0D)  # convert, take the second candidate, commit
+            return proposals(view)
+        return {'no candidates': no_candidates, 'no cancel': no_cancel, 'commits': commits}
+
+    def test_preview_source_leaves_the_typing_session_alone(self):
+        self.check_source(m.core_proposals(self.native))
+
+    def test_preview_source_check_fails_on_broken_sources(self):
+        for name in ['no candidates', 'no cancel']:
+            with self.subTest(name=name), self.assertRaises(AssertionError):
+                self.check_source(self.broken_sources()[name])
+            self.tearDown()
+            self.setUp()
+
+    def test_preview_does_not_learn(self):
+        self.check_no_learning(m.core_proposals(self.native))
+
+    def test_no_learning_check_fails_on_a_committing_source(self):
+        with self.assertRaises(AssertionError):
+            self.check_no_learning(self.broken_sources()['commits'])
+
+    def test_preview_query_time_is_measured_and_bounded(self):
+        propose = m.core_proposals(self.native)
+        for word in ['nihongo', 'nihongo' * 4 + 'niho']:  # The longest word a preview asks for: 32 letters.
+            started = time.monotonic()
+            self.assertTrue(propose(self.query(word)))
+            elapsed = time.monotonic() - started
+            print(json.dumps({'preview_query_seconds': round(elapsed, 4), 'letters': len(word)}), flush=True)
+            self.assertLess(elapsed, m.Preview(propose).timeout)
+
     def test_ctrl_without_composition_reaches_child(self):
         self.assertEqual(self.send(b'\x15\x10\x0f'), b'\x15\x10\x0f')
         self.assertIsNone(self.bridge.view)
