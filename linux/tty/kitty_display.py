@@ -89,6 +89,7 @@ class KittyDisplay:
         self.visible=False
         self.view=None
         self.last=None
+        self.passive_off=False
         self.boundary=Boundary()
 
     def initialize(self, write, read_fd=0):
@@ -135,16 +136,21 @@ class KittyDisplay:
         if self.boundary.queries: self.boundary.queries-=1
         return False
 
-    def update(self,view):
+    def update(self,view,passive=False):
+        """passive: a preview (#19) that must never stop input. It is drawn only above the cursor line,
+        and a late cursor or an unusual terminal mode turns previews off instead of failing."""
         self.view=view
         # Cancelling a view does not cancel an already-issued cursor query.
         # Its reply still belongs here, and its wait must remain bounded.
         if (self.started is not None and (self.pending or view is not None)
                 and time.monotonic()-self.started>1.5):
-            raise ValueError('candidate cursor was not established; no invisible confirmation')
+            if not passive: raise ValueError('candidate cursor was not established; no invisible confirmation')
+            self.pending=False;self.started=None;self.passive_off=True
+            return self.clear()
         if view is None:
             if not self.pending: self.started=None
             return self.clear()
+        if passive and (self.passive_off or self.boundary.origin or self.rows<3 or self.cols<8): return self.clear()
         if self.boundary.origin: raise ValueError('origin-relative cursor mode needs its own proven adapter')
         if self.rows<3 or self.cols<8: raise ValueError('terminal is too small for candidate selection')
         if self.started is None and self.cursor is None: self.started=time.monotonic()
@@ -152,13 +158,14 @@ class KittyDisplay:
         if self.cursor is None:
             self.pending=True
             return b'\x1b[6n'
-        signature=(repr(view),self.cursor,self.rows,self.cols)
+        signature=(repr(view),passive,self.cursor,self.rows,self.cols)
         if signature==self.last: return b''
-        result=self.clear()+self.paint(view)
-        self.visible=True;self.last=signature
+        drawn=self.paint(view,passive)
+        result=self.clear()+drawn
+        self.visible=bool(drawn);self.last=signature
         return result
 
-    def paint(self,view):
+    def paint(self,view,passive=False):
         from PIL import Image, ImageDraw
         def plain(value):
             return ''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))[:240]
@@ -177,7 +184,10 @@ class KittyDisplay:
         page=max(0,selected)//count*count
         lines=[plain(view.get('text',''))]
         lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+count,len(candidates)))]
-        lines += details+['↑↓ / Space   Enter: commit   Esc: cancel']
+        lines += details+[plain(view.get('hint') or '↑↓ / Space   Enter: commit   Esc: cancel')]
+        row,col=self.cursor
+        # A preview stays off the cursor line and below, where the shell edits and lists completions.
+        if passive and row<=len(lines): return b''
         columns=min(self.cols,60)
         width=columns*10; line_height=26
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
@@ -186,7 +196,6 @@ class KittyDisplay:
             draw.text((4,i*line_height+2),line,font=self.font,fill=(240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
-        row,col=self.cursor
         top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
         left=max(1,min(col,self.cols-columns+1))
         out=bytearray(f'\x1b[{top};{left}H'.encode())

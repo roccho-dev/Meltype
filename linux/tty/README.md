@@ -72,6 +72,18 @@ echo is seen. When nothing is remembered, Ctrl+Space reaches the child (NUL).
 So a conversion never erases more than the keys it saw echoed. `--compose`
 restores the previous mode in which every key goes through a composition.
 
+`--preview` (off by default, #19) also shows suggestions for that remembered
+word while typing continues: it takes no key and writes nothing to the child.
+They are asked once per word, after it has stayed the same for 150 ms, from one
+replaceable source in semcmp's shape (roccho-org/ops#479: `propose({input,
+state, focus})` returning `{id, representation, meaning, evidence}`). The first
+source is the Core's own conversion in a second native session, always
+cancelled, so the typing session is untouched and nothing is learned. The
+image is drawn only above the cursor line, never on it or below where the shell
+edits and lists completions, and it is removed before any child output is
+shown. Ctrl+Space still converts as above; a late cursor reply or an unusual
+terminal mode turns previews off rather than stopping input.
+
 While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
 hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
 committing. Ctrl+I (katakana) is included only when Kitty keys tell it apart;
@@ -92,7 +104,8 @@ claim about every later field in an arbitrary app. Canonical no-echo protection
 still applies. Unobserved application-caret changes remain outside that guarantee.
 
 Entry flags: `--native`, `--mozc`, an existing CJK `--font`, and optionally
-`--raw-text` for a known text app and `--compose` for the composition mode. `--transport-proof` is explicitly nonvisual and
+`--raw-text` for a known text app, `--compose` for the composition mode and
+`--preview` for #19's suggestions. `--transport-proof` is explicitly nonvisual and
 for testing, not normal use. Font files are not copied into this repository.
 
 ## Optional shared Proposal port

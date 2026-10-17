@@ -61,6 +61,7 @@ class NativeSession:
         # The existing main API lets the Core avoid unsupported retroactive
         # edits. Expect metadata alone is not proof of the child editor's text.
         self.lib.meltype_set_can_delete(self.session, 0)
+        self.preview_session = None
         self.proposal = None
         self.transport = None
         self.target = ""
@@ -140,7 +141,32 @@ class NativeSession:
         if self.transport is not None: self.transport.cancel()
         return self._result(self.lib.meltype_commit(self.session))
 
+    def preview(self, word):
+        """The Core's view for an ASCII word, from a second session: the typing session is untouched,
+        and the composition is always cancelled, so nothing is committed or learned."""
+        if not self.preview_session:
+            self.preview_session = self.lib.meltype_create()
+            if not self.preview_session: raise UnsafeEffect("Meltype preview session unavailable")
+            self.lib.meltype_set_direct(self.preview_session, 0)
+            self.lib.meltype_set_can_delete(self.preview_session, 0)
+        view = None
+        try:
+            for code in word:
+                key = virtual_key(code)
+                if key is None: return None
+                view = self._result(self.lib.meltype_handle_key(self.preview_session, *key, None, None)).get("view")
+            return view
+        finally:
+            for _ in range(3):
+                if self._result(self.lib.meltype_handle_key(self.preview_session, 0x1B, 0, 0, None, None)).get("view") is None: break
+            else:
+                self.lib.meltype_destroy(self.preview_session)
+                self.preview_session = None
+
     def close(self):
+        if self.preview_session:
+            self.lib.meltype_destroy(self.preview_session)
+            self.preview_session = None
         if self.transport is not None:
             self.transport.close()
             self.transport = None
@@ -198,6 +224,16 @@ WORD = re.compile(rb"[A-Za-z][A-Za-z'-]*\Z")
 SHADOW_LIMIT = 256
 PASTE_BEGIN = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
+
+
+def virtual_key(code, shifted=False):
+    """The Core's (vk, char, shift) for an ASCII byte, or None when it is not a composition key."""
+    if 65 <= code <= 90: return code, code, 1
+    if 97 <= code <= 122: return code - 32, (code - 32 if shifted else code), int(shifted)
+    if 48 <= code <= 57: return code, code, 0
+    if code in SPECIAL: return SPECIAL[code], (code if code == 32 else 0), 0
+    if 32 < code < 127: return SYMBOL.get(code, 0x07), code, int(shifted)
+    return None
 
 
 class InputBridge:
@@ -286,12 +322,18 @@ class InputBridge:
             self.forget()
         return original
 
+    def word(self):
+        """The ASCII word just typed in Direct Input whose echo the child has shown, or None."""
+        if not self.direct or self.view is not None or not self.capturing or self.unechoed or self.erasing:
+            return None
+        match = WORD.search(bytes(self.shadow))
+        return match[0] if match else None
+
     def _convert(self, original):
         self.source = None
-        match = WORD.search(bytes(self.shadow)) if not self.unechoed and not self.erasing else None
+        word = self.word()
         self.forget()
-        if match is None: return original  # Nothing known to convert: the key stays the child's.
-        word = match[0]
+        if word is None: return original  # Nothing known to convert: the key stays the child's.
         out = bytearray(ERASE * len(word))
         for code in word:
             out.extend(self._compose(code, bytes([code])))
@@ -318,19 +360,9 @@ class InputBridge:
         return out
 
     def _compose(self, code, original, shifted=False):
-        if 65 <= code <= 90:
-            vk, char, shift = code, code, 1
-        elif 97 <= code <= 122:
-            vk, char, shift = code - 32, code - 32 if shifted else code, int(shifted)
-        elif 48 <= code <= 57:
-            vk, char, shift = code, code, 0
-        elif code in SPECIAL:
-            vk, char, shift = SPECIAL[code], (code if code == 32 else 0), 0
-        elif 32 < code < 127:
-            vk, char, shift = SYMBOL.get(code, 0x07), code, int(shifted)
-        else:
-            return self._passthrough(original)
-        return self._native_key(vk, char, shift, original)
+        key = virtual_key(code, shifted)
+        if key is None: return self._passthrough(original)
+        return self._native_key(*key, original)
 
     def _step(self, byte):
         return self._key(byte, bytes([byte]))
@@ -477,6 +509,54 @@ class InputBridge:
         return self._step(27)
 
 
+class Preview:
+    """#19: passive suggestions for the word Direct Input remembers. It never handles a key or writes to
+    the child; Ctrl+Space stays the only way to use them. The source is one replaceable callable in
+    semcmp's shape (roccho-org/ops#479): propose({input, state, focus}) -> [{id, representation,
+    meaning, evidence}]. It is asked once per word, after the word has stayed the same for `delay`."""
+
+    def __init__(self, propose, delay=.15, limit=5):
+        self.propose = propose
+        self.delay = delay
+        self.limit = limit
+        self.word = None
+        self.since = None
+        self.asked = False
+        self.view = None
+
+    def update(self, bridge, now):
+        word = bridge.word()
+        if word != self.word:
+            self.word, self.since, self.asked, self.view = word, now, False, None
+        if word is None or self.asked or now - self.since < self.delay: return self.view
+        self.asked = True
+        text = word.decode("ascii")
+        query = {"input": text, "state": {"surface": "terminal"}, "focus": {"span": "word before the caret"}}
+        try:
+            proposals = [p for p in self.propose(query) if isinstance(p, dict) and isinstance(p.get("id"), str)
+                         and p["id"] and isinstance(p.get("representation"), str) and p["representation"]][:self.limit]
+        except Exception:
+            proposals = []  # A preview never stops typing.
+        if proposals:
+            self.view = {"text": text, "candidates": [p["representation"] for p in proposals], "selectedIndex": -1,
+                         "hint": "Ctrl+Space: convert", "proposals": proposals}
+        return self.view
+
+
+def core_proposals(native):
+    """The first source: the Core's own conversion of the word (Mozc), as semcmp-shaped proposals."""
+    def propose(query):
+        view = native.preview(query["input"].encode("ascii")) or {}
+        texts = [view.get("text")] + list(view.get("candidates") or [])
+        proposals = []
+        for text in texts:
+            if isinstance(text, str) and text and text != query["input"] and text not in [p["representation"] for p in proposals]:
+                proposals.append({"id": f"core:{len(proposals)}", "representation": text,
+                                  "meaning": {"kind": "text", "value": text}, "evidence": ["meltype-core"]})
+        return proposals
+    return propose
+
+
 def _size_to_child(master):
     try:
         fcntl.ioctl(master, termios.TIOCSWINSZ, fcntl.ioctl(0, termios.TIOCGWINSZ, b"\x00" * 8))
@@ -558,7 +638,7 @@ def publish_selection(native, fd):
         raise UnsafeEffect("selection observation failed; input may have applied; no replay") from error
 
 
-def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None, direct=True):
+def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None, direct=True, preview=False):
     """Fork before NativeAOT, but exec only after initialization succeeds.
 
     The pipe gates only startup. No credentials, input replay, global daemon,
@@ -605,6 +685,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
         if make_display is not None:
             display = make_display()
             bridge.on_report = display.reply
+        previewer = Preview(core_proposals(native)) if preview and display is not None and direct else None
 
         def refresh():
             poll = getattr(native, "poll_proposals", None)
@@ -613,7 +694,10 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                 if effect_bytes(result): raise UnsafeEffect("provider response attempted an unselected effect")
                 bridge.view = result.get("view")
             if display is None: return
-            write_all(1, display.update(bridge.view))
+            if bridge.view is None and previewer is not None:
+                write_all(1, display.update(previewer.update(bridge, time.monotonic()), passive=True))
+            else:
+                write_all(1, display.update(bridge.view))
             bridge.paused = bool(bridge.view is not None and (display.cursor is None or not display.boundary.safe))
 
         def accept(data):
@@ -724,6 +808,7 @@ def main():
     parser.add_argument("--selection-fd", type=int, help="explicit append-only regular file descriptor for original selected proposals; not an effect receipt")
     parser.add_argument("--raw-text", action="store_true", help="authorize a known raw text application, not an unknown/password field")
     parser.add_argument("--compose", action="store_true", help="every key goes through a composition (no Direct Input)")
+    parser.add_argument("--preview", action="store_true", help="show suggestions for the word just typed in Direct Input (#19)")
     parser.add_argument("--transport-proof", action="store_true", help="explicit nonvisual test mode only")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -737,7 +822,7 @@ def main():
     return run(argv or [os.environ.get("SHELL", "/bin/sh")],
                lambda: NativeSession(args.native, args.mozc, os.environ.get("MELTYPE_PROPOSAL_URL")),
                make_display if args.font is not None else None, raw_text=args.raw_text, selection_fd=args.selection_fd,
-               direct=not args.compose)
+               direct=not args.compose, preview=args.preview)
 
 
 if __name__ == "__main__":
