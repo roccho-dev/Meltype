@@ -209,13 +209,15 @@ def preview_events():
     text = machine.succeed("cat /run/meltype-proof/preview-log 2>/dev/null || true")
     return [json.loads(line) for line in text.splitlines()]
 
-def wait_shown(word):
+def wait_shown(word=None):
+    """The latest preview event shows current (not stale) suggestions, for `word` if given."""
     deadline = time.monotonic() + 15
     while True:
         events = preview_events()
-        if events and events[-1]["event"] == "show" and events[-1]["input"] == word:
+        last = events[-1] if events else {}
+        if last.get("event") in ("show", "update") and not last.get("stale") and word in (None, last.get("input")):
             time.sleep(.5)  # bcon's next frame carries the image
-            return events[-1]
+            return last
         assert time.monotonic() < deadline, (word, events, machine.succeed("cat /run/meltype-proof/*-errors"))
         time.sleep(.2)
 
@@ -245,8 +247,18 @@ time.sleep(2)
 for _ in range(4): machine.send_key("ret")  # Leave rows above the prompt for the preview.
 time.sleep(1)
 before = scanout("B-preview-before")
-machine.send_chars("echo nihongo")
+machine.send_chars("echo ni")
+wait_shown()
+first = len(preview_events()) - 1
+for i, key in enumerate("hongo"):            # #19: typing on, the suggestions stay on the screen
+    machine.send_chars(key)
+    time.sleep(.1)                           # shorter than the 150 ms wait: the old suggestions are up
+    panel, _ = new_boxes(scanout(f"B-preview-typing-{i}"), before)
+    assert panel is not None, ("the preview disappeared while typing", key, preview_events()[first:])
 event = wait_shown("nihongo")
+kept = preview_events()[first:]
+assert kept[0]["event"] in ("show", "update") and not [e for e in kept if e["event"] == "hide"], kept
+assert len({e["rect"][1] for e in kept}) == 1, kept   # replaced where it was
 assert event["representations"][0] == "日本語", event          # the content, not only pixels
 top, left, rows, cols = event["rect"]
 assert top + rows <= event["cursor"][0], event                  # above the cursor line by its own account

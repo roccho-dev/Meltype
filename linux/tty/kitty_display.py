@@ -95,6 +95,7 @@ class KittyDisplay:
         self.pending_passive=False
         self.late=0
         self.placed=None
+        self.painted=None
         self.visible_passive=False
         self.boundary=Boundary()
 
@@ -121,7 +122,15 @@ class KittyDisplay:
         self.visible=False;self.last=None
         return f'\x1b_Ga=d,d=I,i={self.image_id},q=2\x1b\\'.encode()
 
-    def output(self,data):
+    def output(self,data,moved=None):
+        """moved: columns a pure echo of the typed keys moved the cursor (#19), else None. A preview stays
+        through such an echo while the cursor stays on its line; anything else removes it first."""
+        if moved is not None and self.visible and self.visible_passive and self.cursor is not None:
+            row,col=self.cursor
+            if 1<=col+moved<=self.cols:
+                self.boundary.feed(data)
+                self.cursor=(row,col+moved)
+                return data
         before=self.clear()
         self.boundary.feed(data)
         self.cursor=None
@@ -170,14 +179,18 @@ class KittyDisplay:
         if self.cursor is None:
             self.pending=True;self.pending_passive=passive
             return b'\x1b[6n'
-        signature=(repr(view),passive,self.cursor,self.rows,self.cols)
+        # A visible preview is replaced where it is, under the same image id (no delete, no flicker).
+        anchored=passive and self.visible and self.visible_passive
+        where=(self.cursor[0],self.placed[1]) if anchored else self.cursor
+        signature=(repr(view),passive,where,self.rows,self.cols)
         if signature==self.last: return b''
-        drawn=self.paint(view,passive)
-        result=self.clear()+drawn
+        drawn=self.paint(view,passive,left=self.placed[1] if anchored else None)
+        result=(b'' if anchored and drawn else self.clear())+drawn
         self.visible=bool(drawn);self.visible_passive=bool(drawn) and passive;self.last=signature
+        if drawn: self.painted=view
         return result
 
-    def paint(self,view,passive=False):
+    def paint(self,view,passive=False,left=None):
         from PIL import Image, ImageDraw
         def plain(value):
             return ''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))[:240]
@@ -194,7 +207,9 @@ class KittyDisplay:
         details=details[:max(0,budget-3)]
         count=min(5,max(1,budget-2-len(details)))
         page=max(0,selected)//count*count
-        lines=[plain(view.get('text',''))]
+        # A stale preview (#19) belongs to an earlier word: labelled with that word and "…", drawn dimmed.
+        stale=bool(passive and view.get('stale'))
+        lines=[plain(view.get('text',''))+(' …' if stale else '')]
         lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+count,len(candidates)))]
         # The Core's view always has its own (Windows) hint; only a preview draws one of its own.
         lines += details+[plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel']
@@ -206,11 +221,11 @@ class KittyDisplay:
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
         draw=ImageDraw.Draw(image)
         for i,line in enumerate(lines):
-            draw.text((4,i*line_height+2),line,font=self.font,fill=(240,242,246))
+            draw.text((4,i*line_height+2),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
         top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
-        left=max(1,min(col,self.cols-columns+1))
+        left=left if left is not None else max(1,min(col,self.cols-columns+1))
         self.placed=(top,left,len(lines),columns)
         out=bytearray(f'\x1b[{top};{left}H'.encode())
         for offset in range(0,len(payload),4096):
