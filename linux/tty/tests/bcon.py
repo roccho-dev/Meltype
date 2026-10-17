@@ -202,9 +202,49 @@ finished("hidden")
 assert contents("hidden-text") == "not-a-real-password"
 assert contents("provider-requests") == requests_before
 scanout("B-hidden-after")
+
+# #19 passive preview (--preview): keys still reach an interactive bash one at a time; suggestions
+# for the echoed word are drawn above the cursor line and removed before bash writes anything.
+machine.succeed("touch /run/meltype-proof/nihongo-a /run/meltype-proof/nihongo-b")
+launch("preview", "meltype-tty --raw-text --preview -- bash --noprofile --norc -i")
+machine.wait_until_succeeds("pgrep -f '[b]ash --noprofile --norc -i'", timeout=30)
+time.sleep(2)
+for _ in range(4): machine.send_key("ret")  # Leave rows above the prompt for the preview.
+time.sleep(1)
+before = scanout("B-preview-before")
+machine.send_chars("echo nihongo")
+candidates("B-preview-shown", before)       # Shown while the keys already reached bash.
+machine.send_key("ctrl-spc")                # Adoption: the same conversion as #16.
+machine.send_chars(" ")
+machine.send_key("ret")
+machine.send_chars(" > /run/meltype-proof/preview-conv\n")
+machine.wait_until_succeeds("test -s /run/meltype-proof/preview-conv")
+assert contents("preview-conv").strip() == "日本語", contents("preview-conv")
+before = scanout("B-preview-list-before")
+machine.send_chars("printf %s /run/meltype-proof/nihongo")
+candidates("B-preview-list-shown", before)
+machine.send_key("tab")                     # Readline completes the common prefix "nihongo-".
+time.sleep(.5)
+machine.send_key("tab")                     # Readline lists both files below the prompt.
+time.sleep(1.5)
+listed = scanout("B-preview-listed")
+assert panels(listed) <= panels(before) + 1000, "preview left over bash's completion list"
+machine.send_chars("a > /run/meltype-proof/preview-tab\n")
+machine.wait_until_succeeds("test -s /run/meltype-proof/preview-tab")
+assert contents("preview-tab") == "/run/meltype-proof/nihongo-a", contents("preview-tab")
+machine.send_chars("echo r-marker >> /run/meltype-proof/preview-r\n")
+time.sleep(1)
+machine.send_key("ctrl-r")
+machine.send_chars("r-marker")
+time.sleep(.5)
+machine.send_key("ret")
+machine.wait_until_succeeds("test \"$(grep -c r-marker /run/meltype-proof/preview-r)\" = 2")
+machine.send_chars("exit\n")
+finished("preview")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
-    "direct":contents("direct-text"),"shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
+    "direct":contents("direct-text"),"preview":{"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
+    "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
     "provider":"LOCAL_FIXTURE","physical_host":"NOT_RUN","independent_review":"NOT_RUN",
