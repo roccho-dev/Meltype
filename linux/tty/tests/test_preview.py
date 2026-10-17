@@ -265,4 +265,96 @@ class Observation(unittest.TestCase):
     def test_off_by_default(self):
         self.assertIsNone(inspect.signature(m.run).parameters['preview_fd'].default)
 
+class Persistence(unittest.TestCase):
+    """While the child only echoes the typed keys, the preview stays and is replaced in place."""
+    ANSWERS={'nihong':[{'id':'a','representation':'にほんg','meaning':{},'evidence':[]}],
+             'nihongo':[{'id':'b','representation':'日本語','meaning':{},'evidence':[]}]}
+
+    def setUp(self):
+        self.source=lambda q:self.ANSWERS.get(q['input'],[])
+        self.n,self.b=typed(b'echo nihong')
+        self.p=preview(self.source,delay=0)
+        self.d=KittyDisplay(FONT,24,80,4242);self.d.cursor=(20,12)
+        self.directory=tempfile.TemporaryDirectory();self.addCleanup(self.directory.cleanup)
+        self.path=Path(self.directory.name)/'preview.jsonl'
+        self.fd=os.open(self.path,os.O_CREAT|os.O_WRONLY|os.O_APPEND,0o600);self.addCleanup(os.close,self.fd)
+        self.log=m.PreviewLog(self.fd)
+
+    def events(self): return [json.loads(line) for line in self.path.read_text().splitlines()]
+
+    def show(self,now):
+        out=self.d.update(ask(self.p,self.b,now),passive=True);self.log.note(self.d,self.p,'update');return out
+
+    def type_echoed(self,key):
+        self.assertEqual(self.b.feed(key),key)
+        moved=self.b.observe(key)
+        out=self.d.output(key,moved);self.log.note(self.d,self.p,'child output')
+        return out
+
+    def test_observe_reports_how_far_an_echo_moved_the_cursor(self):
+        n=Native();b=m.InputBridge(n,direct=True)
+        b.feed(b'ab');self.assertEqual(b.observe(b'ab'),2)
+        b.feed(b'\x7f');self.assertEqual(b.observe(b'\x08\x1b[K'),-1)
+        self.assertIsNone(b.observe(b'\r\nlisting'))
+
+    def test_an_echo_keeps_the_preview_and_it_is_replaced_in_place(self):
+        self.assertIn(b'a=T',self.show(1))
+        self.assertEqual(self.type_echoed(b'o'),b'o')            # no delete before the echo
+        stale=self.d.update(self.p.update(self.b,2),passive=True);self.log.note(self.d,self.p,'update')
+        fresh=self.show(3)
+        for out in [stale,fresh]:
+            self.assertIn(b'a=T',out)
+            self.assertNotIn(b'a=d',out)                          # replaced under the same id, never removed
+            self.assertIn(b'i=4242',out)
+        events=self.events()
+        self.assertEqual([e['event'] for e in events],['show','update','update'])
+        self.assertEqual([(e['input'],e['stale']) for e in events],[('nihong',False),('nihong',True),('nihongo',False)])
+        self.assertEqual(events[-1]['representations'],['日本語'])
+        self.assertEqual(len({e['rect'][1] for e in events}),1)   # the same place
+
+    def test_stale_candidates_are_marked_and_never_shown_as_current(self):
+        self.show(1)
+        self.type_echoed(b'o')
+        view=self.p.update(self.b,2)
+        self.assertTrue(view['stale'])
+        self.assertEqual(view['text'],'nihong')                   # labelled with the word they belong to
+        fills=[];lines=[]
+        class Draw:
+            def text(self,position,line,fill=None,**_):lines.append(line);fills.append(fill)
+        with patch('PIL.ImageDraw.Draw',return_value=Draw()):self.d.paint(view,passive=True)
+        self.assertTrue(lines[0].endswith('…'))
+        fresh=[];
+        class Fresh:
+            def text(self,position,line,fill=None,**_):fresh.append(fill)
+        with patch('PIL.ImageDraw.Draw',return_value=Fresh()):self.d.paint(dict(view,stale=False),passive=True)
+        self.assertTrue(all(a!=b for a,b in zip(fills,fresh)))   # dimmed
+
+    def test_output_other_than_the_echo_hides(self):
+        self.show(1)
+        for output in [b'\r\nnihongo-a  nihongo-b\r\n',b'\x1b[2J',b'\x1b[1A']:
+            self.setUp();self.show(1)
+            self.assertIsNone(self.b.observe(output))
+            self.assertTrue(self.d.output(output,None).startswith(b'\x1b_Ga=d,d=I,i=4242'))
+            self.log.note(self.d,self.p,'child output')
+            self.assertEqual(self.events()[-1],{'event':'hide','reason':'child output'})
+
+    def test_an_echo_past_the_last_column_hides(self):
+        self.d.cursor=(20,80);self.show(1)
+        self.assertTrue(self.d.output(b'o',1).startswith(b'\x1b_Ga=d'))
+
+    def test_no_answer_for_the_new_word_hides_the_stale_one(self):
+        self.show(1)
+        self.type_echoed(b'x')
+        self.assertTrue(self.p.update(self.b,2)['stale'])
+        self.assertIsNone(ask(self.p,self.b,3))
+
+    def test_the_word_gone_or_a_conversion_hides(self):
+        self.show(1)
+        self.b.feed(b'\t')
+        self.assertIsNone(self.p.update(self.b,2))
+        self.setUp();self.show(1)
+        self.b.feed(b'\x00')
+        self.assertIsNotNone(self.b.view)
+        self.assertIsNone(self.p.update(self.b,2))
+
 if __name__=='__main__':unittest.main()
