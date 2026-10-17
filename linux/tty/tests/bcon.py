@@ -209,13 +209,15 @@ def preview_events():
     text = machine.succeed("cat /run/meltype-proof/preview-log 2>/dev/null || true")
     return [json.loads(line) for line in text.splitlines()]
 
-def wait_shown(word):
+def wait_shown(word=None):
+    """The latest preview event shows current (not stale) suggestions, for `word` if given."""
     deadline = time.monotonic() + 15
     while True:
         events = preview_events()
-        if events and events[-1]["event"] == "show" and events[-1]["input"] == word:
+        last = events[-1] if events else {}
+        if last.get("event") in ("show", "update") and not last.get("stale") and word in (None, last.get("input")):
             time.sleep(.5)  # bcon's next frame carries the image
-            return events[-1]
+            return last
         assert time.monotonic() < deadline, (word, events, machine.succeed("cat /run/meltype-proof/*-errors"))
         time.sleep(.2)
 
@@ -237,6 +239,54 @@ def new_boxes(after, before):
         rest.paste(0, (max(0, left - 3), max(0, upper - 3), min(rest.width, right + 3), min(rest.height, lower + 3)))
     return panel, rest.getbbox()
 
+# #19 P19e: a trailing "nn" (nihonn) against "nihon", typed one key at a time with --preview. It runs
+# before the version-specific preview checks so the same script records 1.2.1.6 and 1.2.1.7. Everything
+# is recorded first (preview events, scanouts, the Ctrl+Space + Enter result) and printed; the User's
+# expectation (kanji for "nihonn") is checked last, so a failing run still carries the whole record.
+def diag_events():
+    text = machine.succeed("cat /run/meltype-proof/diag-log 2>/dev/null || true")
+    return [json.loads(line) for line in text.splitlines()]
+
+def has_kanji(text):
+    return any(chr(0x4e00) <= ch <= chr(0x9fff) for ch in text)
+
+launch("diag", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
+    "3>>/run/meltype-proof/diag-log")
+machine.wait_until_succeeds("pgrep -f '[b]ash --noprofile --norc -i'", timeout=30)
+time.sleep(2)
+for _ in range(4): machine.send_key("ret")
+time.sleep(1)
+diagnosis = {}
+for word in ["nihonn", "nihon"]:
+    before = scanout(f"B-diag-{word}-before")
+    start = len(diag_events())
+    machine.send_chars("echo ")
+    keys = []
+    for i, key in enumerate(word):
+        machine.send_chars(key)
+        time.sleep(.3)
+        keys.append({"key": key, "panel": new_boxes(scanout(f"B-diag-{word}-{i}"), before)[0],
+                     "last_event": (diag_events()[start:] or [None])[-1]})
+    time.sleep(1.5)
+    settled = scanout(f"B-diag-{word}-settled")
+    events = diag_events()[start:]
+    machine.send_key("ctrl-spc")
+    time.sleep(1)
+    scanout(f"B-diag-{word}-converting")
+    machine.send_key("ret")
+    machine.send_chars(f" > /run/meltype-proof/diag-{word}\n")
+    machine.wait_until_succeeds(f"test -e /run/meltype-proof/diag-{word}")
+    time.sleep(.5)
+    diagnosis[word] = {"keys": keys, "events": events, "settled_panel": new_boxes(settled, before)[0],
+                       "converted": contents(f"diag-{word}").strip()}
+machine.send_chars("exit\n")
+finished("diag")
+print("DIAG-P19E " + json.dumps(diagnosis, ensure_ascii=False), flush=True)
+got = diagnosis["nihonn"]
+fresh = [e for e in got["events"] if e["event"] in ("show", "update") and not e.get("stale") and e.get("input") == "nihonn"]
+assert fresh and any(has_kanji(r) for r in fresh[-1]["representations"]), ("nihonn: no kanji preview", got)
+assert has_kanji(got["converted"]), ("nihonn: Ctrl+Space did not convert to kanji", got)
+
 machine.succeed("touch /run/meltype-proof/nihongo-a /run/meltype-proof/nihongo-b")
 launch("preview", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
     "3>>/run/meltype-proof/preview-log")
@@ -245,8 +295,18 @@ time.sleep(2)
 for _ in range(4): machine.send_key("ret")  # Leave rows above the prompt for the preview.
 time.sleep(1)
 before = scanout("B-preview-before")
-machine.send_chars("echo nihongo")
+machine.send_chars("echo ni")
+wait_shown()
+first = len(preview_events()) - 1
+for i, key in enumerate("hongo"):            # #19: typing on, the suggestions stay on the screen
+    machine.send_chars(key)
+    time.sleep(.1)                           # shorter than the 150 ms wait: the old suggestions are up
+    panel, _ = new_boxes(scanout(f"B-preview-typing-{i}"), before)
+    assert panel is not None, ("the preview disappeared while typing", key, preview_events()[first:])
 event = wait_shown("nihongo")
+kept = preview_events()[first:]
+assert kept[0]["event"] in ("show", "update") and not [e for e in kept if e["event"] == "hide"], kept
+assert len({e["rect"][1] for e in kept}) == 1, kept   # replaced where it was
 assert event["representations"][0] == "日本語", event          # the content, not only pixels
 top, left, rows, cols = event["rect"]
 assert top + rows <= event["cursor"][0], event                  # above the cursor line by its own account
@@ -290,6 +350,7 @@ finished("preview")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
+    "diag_p19e":diagnosis,
     "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
