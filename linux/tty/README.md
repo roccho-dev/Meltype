@@ -83,8 +83,13 @@ is the Core's own conversion in a second native session, always cancelled, so
 the typing session is untouched and nothing is committed or learned; Core calls
 are serialized, so only Ctrl+Space (which calls the Core) can wait for a query
 in flight. The image is drawn only above the cursor line, never on it or below
-where the shell edits and lists completions, and it is removed before any child
-output is shown. A late or out-of-range cursor reply, or an unusual terminal
+where the shell edits and lists completions. While the child only echoes the
+typed keys it stays, and new suggestions replace it in place under the same
+image id; until the new word's answer arrives the previous suggestions stay
+dimmed and labelled with their own word and "…", so they never pass for the
+current word's. Any other child output (a completion list, a new line, a
+redraw), an echo that would wrap, the word ending, or Ctrl+Space removes it
+first. A late or out-of-range cursor reply, or an unusual terminal
 mode, turns previews off (the reason is kept) rather than stopping input.
 Without `--preview` nothing differs from 1.2.1.5: in particular the candidate
 image never draws the Core's own key hint. `--preview-fd` explicitly records,

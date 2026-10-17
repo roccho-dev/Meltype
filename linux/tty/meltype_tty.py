@@ -357,18 +357,24 @@ class InputBridge:
         return bytes(out)
 
     def observe(self, data):
-        """Child output. Only the echo of the remembered keys keeps them; anything else forgets them."""
-        index = 0
+        """Child output. Only the echo of the remembered keys keeps them; anything else forgets them.
+        Returns how many columns that echo moved the cursor, or None when the output was anything else."""
+        index = moved = 0
         while index < len(data) and (self.unechoed or self.erasing):
             if self.unechoed and data[index] == self.unechoed[0]:
                 del self.unechoed[0]
                 index += 1
+                moved += 1
                 continue
             erase = next((e for e in ERASE_ECHOES if data.startswith(e, index)), None) if self.erasing else None
             if erase is None: break
             self.erasing -= 1
             index += len(erase)
-        if index < len(data): self.forget()
+            moved -= 1
+        if index < len(data):
+            self.forget()
+            return None
+        return moved
 
     def drain(self):
         out = bytes(self.outbox)
@@ -554,14 +560,18 @@ class Preview:
         word = bridge.word()
         if word is not None and len(word) > self.longest: word = None
         if word != self.word:
-            self.word, self.since, self.asked, self.view = word, now, False, None
+            # Typing on keeps the previous suggestions, marked stale (they are labelled with their own
+            # word and drawn dimmed) until the new word's answer replaces or removes them.
+            stale = dict(self.view, stale=True) if self.view is not None and word is not None else None
+            self.word, self.since, self.asked, self.view = word, now, False, stale
         with self.lock:
             answer, self.answer = self.answer, None
         if answer is not None:
             asked, seconds, proposals = answer
-            if asked == word and seconds <= self.timeout and proposals:
+            if asked == word:
                 self.view = {"text": word.decode("ascii"), "candidates": [p["representation"] for p in proposals],
-                             "selectedIndex": -1, "hint": "Ctrl+Space: convert", "proposals": proposals}
+                             "selectedIndex": -1, "hint": "Ctrl+Space: convert", "proposals": proposals,
+                             "stale": False} if seconds <= self.timeout and proposals else None
         busy = self.thread is not None and self.thread.is_alive()
         if word is not None and not self.asked and not busy and now - self.since >= self.delay:
             self.asked = True
@@ -592,22 +602,24 @@ class PreviewLog:
         self.off = None
 
     def note(self, display, previewer, reason):
+        """show: drawn where nothing was; update: replaced in place; hide: removed (with the reason)."""
         if self.fd is None: return
         events = []
         if display.preview_off and display.preview_off != self.off:
             self.off = display.preview_off
             events.append({"event": "off", "reason": self.off})
-        placed = display.placed if display.visible and display.visible_passive else None
-        if placed != self.shown:
-            if placed is None:
+        shown = display.last if display.visible and display.visible_passive else None
+        if shown != self.shown:
+            if shown is None:
                 events.append({"event": "hide", "reason": reason})
             else:
-                view = previewer.view or {}
-                events.append({"event": "show", "input": view.get("text"),
+                view = display.painted or {}
+                events.append({"event": "update" if self.shown is not None else "show", "input": view.get("text"),
+                               "stale": bool(view.get("stale")),
                                "ids": [p["id"] for p in view.get("proposals", [])],
                                "representations": list(view.get("candidates", [])),
-                               "rect": list(placed), "cursor": list(display.cursor)})
-            self.shown = placed
+                               "rect": list(display.placed), "cursor": list(display.cursor)})
+            self.shown = shown
         try:
             for event in events: write_all(self.fd, (json.dumps(event, ensure_ascii=False) + "\n").encode())
         except (OSError, UnsafeEffect):
@@ -848,9 +860,15 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                     break
                 if not data:
                     break
-                bridge.observe(data)
-                write_all(1, display.output(data) if display is not None else data)
-                if previewer is not None: preview_log.note(display, previewer, "child output")
+                moved = bridge.observe(data)
+                if display is None:
+                    write_all(1, data)
+                elif previewer is None:
+                    write_all(1, display.output(data))
+                else:
+                    # A pure echo of the typed keys keeps the preview (#19); anything else removes it first.
+                    write_all(1, display.output(data, moved))
+                    preview_log.note(display, previewer, "child output")
                 refresh()
             if 0 in ready:
                 data = os.read(0, 4096)
