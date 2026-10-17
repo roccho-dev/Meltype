@@ -120,6 +120,16 @@ class NativeProof(unittest.TestCase):
         self.assertIsNone(self.bridge.view)
         self.assertEqual(self.send(b'ls'), b'ls')
 
+    def test_preview_source_leaves_the_typing_session_alone(self):
+        # #19: the Core's suggestions come from a second, always-cancelled session.
+        self.send(b'nihongo')
+        proposals = m.core_proposals(self.native)({'input': 'nihongo', 'state': {}, 'focus': {}})
+        self.assertEqual(proposals[0]['representation'], '日本語')
+        self.assertEqual(set(proposals[0]), {'id', 'representation', 'meaning', 'evidence'})
+        self.assertEqual(self.bridge.view['text'], '日本語')
+        self.assertEqual(self.send(b'\r'), '日本語'.encode())
+        self.assertIsNone(self.bridge.view)
+
     def test_ctrl_without_composition_reaches_child(self):
         self.assertEqual(self.send(b'\x15\x10\x0f'), b'\x15\x10\x0f')
         self.assertIsNone(self.bridge.view)
