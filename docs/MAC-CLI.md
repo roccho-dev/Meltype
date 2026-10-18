@@ -71,6 +71,7 @@ mac/build-cli.sh --install   # インストールだけ
 入れたアプリで、オフラインの確認テストを実行できます。
 
 ```bash
+"$HOME/Library/Input Methods/Meltype.app/Contents/MacOS/Meltype" --version
 "$HOME/Library/Input Methods/Meltype.app/Contents/MacOS/Meltype" --self-test
 ```
 

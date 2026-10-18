@@ -25,6 +25,8 @@ internal static class ProfileTests
         // 標準に戻すと、標準の値に戻る。共通の項目 (ログ・更新) は切り替えても変わらない
         work.FileLog = true;
         work.TsfOffered = true;
+        work.SettingsShowHelp = false;
+        work.SettingsWheelChangesValue = false;
         var standard = work.SwitchProfile("標準");
         Assert.Equal("標準", standard.ActiveProfile);
         Assert.Equal(DetectionLevel.Balanced, standard.DetectionLevel);
@@ -32,6 +34,7 @@ internal static class ProfileTests
         Assert.Equal(0, standard.AppKinds.Count, "表 (独自の種類) もプロファイルごと");
         Assert.True(standard.FileLog, "ログはどのプロファイルでも共通");
         Assert.True(standard.TsfOffered, "Meltype IME を入れるかを聞いたかは、どのプロファイルでも共通 (切り替えるたびに聞かない)");
+        Assert.True(!standard.SettingsShowHelp && !standard.SettingsWheelChangesValue, "設定画面の説明の欄・ホイールの設定は、どのプロファイルでも共通");
 
         // もう一度 仕事用 にすると、仕事用で変えた値が戻ってくる
         var back = standard.SwitchProfile("仕事用");
@@ -103,6 +106,59 @@ internal static class ProfileTests
         var odd = b.ImportProfile("{\"format\":\"meltype-profile\",\"name\":\"x\",\"values\":{\"Enabled\":false,\"Unknown\":1,\"IdleFlushMs\":999999}}")!;
         Assert.True(odd.Enabled, "ON/OFF は読み込まない");
         Assert.Equal(3000, odd.IdleFlushMs, "範囲に収める");
+    }
+
+    [Test]
+    public static void ProfileNames_AreNotWrittenToJson()
+    {
+        // プロファイルの名前の一覧は Profiles から作るので、config.json にも書き出したファイルにも入れない
+        var settings = new Settings().Normalize().AddProfile("仕事用")!;
+        Assert.True(!settings.ToJson().Contains("ProfileNames"), "config.json に入れない");
+        Assert.True(!settings.ExportProfile().Contains("ProfileNames"), "書き出したファイルに、ほかのプロファイルの名前を入れない");
+    }
+    [Test]
+    public static void SettingsForm_KeepsTrayChangesMadeWhileOpen()
+    {
+        // 設定画面を開いた時点の値。開いている間に、トレイで一時停止・判定の強さを変える
+        var opened = new Settings().Normalize().AddProfile("仕事用")!.SwitchProfile("標準");
+        var current = opened.Clone();
+        current.Enabled = false;
+        current.DetectionLevel = DetectionLevel.Aggressive;
+
+        // 画面で何も変えずに閉じる: トレイで変えた値のまま
+        var kept = Settings.MergeEdits(opened, opened.Clone(), current);
+        Assert.True(!kept.Enabled, "一時停止のまま");
+        Assert.Equal(DetectionLevel.Aggressive, kept.DetectionLevel, "トレイで変えた判定の強さのまま");
+
+        // 画面で変えた項目だけを重ねる。画面で判定の強さも変えたら画面の値
+        var edited = opened.Clone();
+        edited.LiveConversion = false;
+        var merged = Settings.MergeEdits(opened, edited, current);
+        Assert.True(!merged.LiveConversion && !merged.Enabled, "ライブ変換 OFF を重ね、一時停止のまま");
+        Assert.Equal(DetectionLevel.Aggressive, merged.DetectionLevel);
+        edited.DetectionLevel = DetectionLevel.Conservative;
+        Assert.Equal(DetectionLevel.Conservative, Settings.MergeEdits(opened, edited, current).DetectionLevel, "画面で変えた値");
+
+        // トレイで「仕事用」に切り替えた: 画面 (標準のまま) で変えた値は標準に入り、仕事用は変わらない
+        var switched = opened.SwitchProfile("仕事用");
+        switched.DetectionLevel = DetectionLevel.Manual;
+        var onWork = Settings.MergeEdits(opened, edited, switched);
+        Assert.Equal("仕事用", onWork.ActiveProfile, "トレイで切り替えたプロファイルのまま");
+        Assert.True(onWork.LiveConversion, "仕事用のライブ変換は変えない");
+        Assert.Equal(DetectionLevel.Manual, onWork.DetectionLevel, "トレイで変えた仕事用の判定の強さのまま");
+        var standard = onWork.SwitchProfile("標準");
+        Assert.True(!standard.LiveConversion, "画面で変えた値は標準に入る");
+        Assert.Equal(DetectionLevel.Conservative, standard.DetectionLevel);
+        Assert.Equal(Settings.MergeEdits(opened, opened.Clone(), switched).ToJson(), switched.ToJson(), "何も変えなければ今の設定そのもの");
+
+        // 画面で「仕事用」に切り替えた (トレイでは切り替えていない): 画面のプロファイルにする
+        var formSwitched = opened.SwitchProfile("仕事用");
+        formSwitched.TypoEnabled = false;
+        var toWork = Settings.MergeEdits(opened, formSwitched, current);
+        Assert.Equal("仕事用", toWork.ActiveProfile);
+        Assert.True(!toWork.TypoEnabled && !toWork.Enabled, "画面で変えた値を重ね、一時停止のまま");
+        Assert.Equal(DetectionLevel.Balanced, toWork.DetectionLevel, "標準でトレイで変えた判定の強さは、仕事用に入れない");
+        Assert.Equal(DetectionLevel.Aggressive, toWork.SwitchProfile("標準").DetectionLevel, "標準のトレイで変えた値は標準に残る");
     }
     [Test]
     public static void PasteApps_MatchProcessNames()

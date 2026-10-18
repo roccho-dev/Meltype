@@ -831,7 +831,7 @@ def capture_allowed(master, raw_text=False):
     return bool(flags & termios.ECHO) or bool(raw_text and not flags & termios.ICANON)
 
 
-def validate_selection_fd(fd):
+def validate_observation_fd(fd):
     """Explicit caller-owned append-only file; never a terminal or blocking pipe."""
     if fd is None: return
     if type(fd) is not int or fd < 3:
@@ -871,8 +871,8 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
     """
     if not os.isatty(0) or not os.isatty(1):
         raise UnsafeEffect("requires an interactive TTY")
-    validate_selection_fd(selection_fd)
-    validate_selection_fd(preview_fd)
+    validate_observation_fd(selection_fd)
+    validate_observation_fd(preview_fd)
     original = termios.tcgetattr(0)
     reader, writer = os.pipe()
     try:

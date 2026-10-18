@@ -298,47 +298,30 @@ def new_boxes(after, before):
         rest.paste(0, (max(0, left - 3), max(0, upper - 3), min(rest.width, right + 3), min(rest.height, lower + 3)))
     return panel, rest.getbbox()
 
-# #19 P19e: a trailing "nn" (nihonn) against "nihon", typed one key at a time with --preview. It runs
-# before the version-specific preview checks so the same script records 1.2.1.6 and 1.2.1.7. Everything
-# is recorded first (preview events, scanouts, the Ctrl+Space + Enter result) and printed; the User's
-# expectation (kanji for "nihonn") is checked last, so a failing run still carries the whole record.
-def diag_events():
-    text = machine.succeed("cat /run/meltype-proof/diag-log 2>/dev/null || true")
+# #19 P19e-g: a trailing "nn" (nihonn) with --preview. The preview offers kanji, Ctrl+Space + Enter commits
+# the preview's first candidate (日本), and Esc twice puts the typed letters back.
+def nn_events():
+    text = machine.succeed("cat /run/meltype-proof/nn-log 2>/dev/null || true")
     return [json.loads(line) for line in text.splitlines()]
 
 def has_kanji(text):
     return any(chr(0x4e00) <= ch <= chr(0x9fff) for ch in text)
 
-launch("diag", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
-    "3>>/run/meltype-proof/diag-log")
+launch("nn", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
+    "3>>/run/meltype-proof/nn-log")
 machine.wait_until_succeeds("pgrep -f '[b]ash --noprofile --norc -i'", timeout=30)
 time.sleep(2)
 for _ in range(4): machine.send_key("ret")
 time.sleep(1)
-diagnosis = {}
-for word in ["nihonn", "nihon"]:
-    before = scanout(f"B-diag-{word}-before")
-    start = len(diag_events())
-    machine.send_chars("echo ")
-    keys = []
-    for i, key in enumerate(word):
-        machine.send_chars(key)
-        time.sleep(.3)
-        keys.append({"key": key, "panel": new_boxes(scanout(f"B-diag-{word}-{i}"), before)[0],
-                     "last_event": (diag_events()[start:] or [None])[-1]})
-    time.sleep(1.5)
-    settled = scanout(f"B-diag-{word}-settled")
-    events = diag_events()[start:]
-    machine.send_key("ctrl-spc")
-    time.sleep(1)
-    scanout(f"B-diag-{word}-converting")
-    machine.send_key("ret")
-    machine.send_chars(f" > /run/meltype-proof/diag-{word}\n")
-    machine.wait_until_succeeds(f"test -e /run/meltype-proof/diag-{word}")
-    time.sleep(.5)
-    diagnosis[word] = {"keys": keys, "events": events, "settled_panel": new_boxes(settled, before)[0],
-                       "converted": contents(f"diag-{word}").strip()}
-# Esc twice (conversion, then composition) puts the typed letters back: nothing erased for good.
+machine.send_chars("echo nihonn")
+time.sleep(2)
+fresh = [e for e in nn_events() if e["event"] in ("show", "update") and not e.get("stale") and e.get("input") == "nihonn"]
+machine.send_key("ctrl-spc")
+time.sleep(1)
+machine.send_key("ret")
+machine.send_chars(" > /run/meltype-proof/nn-converted\n")
+machine.wait_until_succeeds("test -e /run/meltype-proof/nn-converted")
+time.sleep(.5)
 machine.send_chars("echo nihonn")
 time.sleep(1)
 machine.send_key("ctrl-spc")
@@ -346,19 +329,17 @@ time.sleep(1)
 for _ in range(2):
     machine.send_key("esc")
     time.sleep(.3)                           # separate standalone Esc keys from an Alt chord
-machine.send_chars(" > /run/meltype-proof/diag-esc\n")
-machine.wait_until_succeeds("test -e /run/meltype-proof/diag-esc")
+machine.send_chars(" > /run/meltype-proof/nn-esc\n")
+machine.wait_until_succeeds("test -e /run/meltype-proof/nn-esc")
 time.sleep(.5)
-diagnosis["esc"] = contents("diag-esc").strip()
+trailing = {"preview": fresh[-1]["representations"] if fresh else None,
+            "converted": contents("nn-converted").strip(), "esc": contents("nn-esc").strip()}
 machine.send_chars("exit\n")
-finished("diag")
-print("DIAG-P19E " + json.dumps(diagnosis, ensure_ascii=False), flush=True)
-got = diagnosis["nihonn"]
-fresh = [e for e in got["events"] if e["event"] in ("show", "update") and not e.get("stale") and e.get("input") == "nihonn"]
-assert fresh and any(has_kanji(r) for r in fresh[-1]["representations"]), ("nihonn: no kanji preview", got)
-assert got["converted"] == "日本", ("nihonn: Ctrl+Space + Enter is not 日本", got)
-assert got["converted"] == fresh[-1]["representations"][0], ("Ctrl+Space differs from the preview's first", got)
-assert diagnosis["esc"] == "nihonn", ("Esc did not put nihonn back", diagnosis["esc"])
+finished("nn")
+assert fresh and any(has_kanji(r) for r in fresh[-1]["representations"]), ("nihonn: no kanji preview", trailing)
+assert trailing["converted"] == "日本", ("nihonn: Ctrl+Space + Enter is not 日本", trailing)
+assert trailing["converted"] == fresh[-1]["representations"][0], ("Ctrl+Space differs from the preview's first", trailing)
+assert trailing["esc"] == "nihonn", ("Esc did not put nihonn back", trailing)
 
 machine.succeed("touch /run/meltype-proof/nihongo-a /run/meltype-proof/nihongo-b")
 launch("preview", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
@@ -544,7 +525,7 @@ print("B-PASTE-RESIZE " + json.dumps(paste_resize, ensure_ascii=False), flush=Tr
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
-    "diag_p19e":diagnosis,
+    "trailing_nn":trailing,
     "paste_resize":paste_resize,
     "reference_display":{"source":"SYNTHETIC_DISPLAY_FIXTURE", "selected":reference_selection,
         "child_text":contents("reference-text"), "full_label_readability":"INDEPENDENT_IMAGE_REVIEW_REQUIRED"},

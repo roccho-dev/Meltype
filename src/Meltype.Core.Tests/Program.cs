@@ -8,6 +8,7 @@ namespace Meltype.Tests;
 ///   dotnet run --project src/Meltype.Core.Tests                 … すべてのテスト
 ///   dotnet run --project src/Meltype.Core.Tests -- Composition  … 名前に一致するテストだけ
 ///   dotnet run --project src/Meltype.Core.Tests -- --eval       … 品質テストの正解率と外れた例
+///   dotnet run --project src/Meltype.Core.Tests -- --version    … 版 (Meltype.Core)
 ///   dotnet run --project src/Meltype.Core.Tests -- --explain konnichiwa hello … 1 文字ずつの判定理由
 /// Windows では src/Meltype.Tests から実行すると、Windows のスペルチェッカーを使い、Windows 専用のテストもまとめて流す。
 /// </summary>
@@ -17,6 +18,9 @@ internal static class Program
     {
         switch (args.FirstOrDefault())
         {
+            case "--version":
+                Console.WriteLine($"Meltype {Meltype.Config.ProjectInfo.CoreVersion}");
+                return 0;
             case "--eval":
                 Quality.Print(Quality.Run());
                 return 0;
@@ -46,6 +50,15 @@ internal static class Program
                 // --mozc-compare 入力ファイル 出力ファイル: 今の変換と、文を丸ごと Mozc に渡す変換を比べる (MELTYPE_MOZC が要る)
                 MozcCompare.Run(args[1], args[2]);
                 Henkan.Shutdown();
+                return 0;
+            case "--perf":
+                // --perf 出力ファイル [例文のファイル] [回数]: 変換エンジンの遅延・段階ごとの時間・候補の数・控えの使い回し・メモリ・正解率 (docs/PERFORMANCE.md)
+                Performance.Measure(args[1], args.ElementAtOrDefault(2), args.Length > 3 ? int.Parse(args[3]) : Performance.DefaultSamples);
+                Henkan.Shutdown();
+                return 0;
+            case "--perf-compare":
+                // --perf-compare 前.json 後.json: --perf の結果を 2 つ比べる
+                Performance.Compare(args[1], args[2]);
                 return 0;
             case "--expect":
                 // --expect 入力ファイル 出力ファイル (Pull Request のチェック用)

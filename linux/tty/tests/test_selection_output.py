@@ -14,7 +14,7 @@ import meltype_tty as m
 class SelectionOutputTests(unittest.TestCase):
     def test_disabled_never_reads_selection(self):
         native=Mock()
-        m.validate_selection_fd(None)
+        m.validate_observation_fd(None)
         m.publish_selection(native,None)
         native.take_selection.assert_not_called()
 
@@ -27,7 +27,7 @@ class SelectionOutputTests(unittest.TestCase):
             path=Path(directory)/'selected'
             fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_APPEND,0o600)
             try:
-                m.validate_selection_fd(fd)
+                m.validate_observation_fd(fd)
                 self.assertFalse(os.get_inheritable(fd))
                 m.publish_selection(native,fd);m.publish_selection(native,fd)
                 self.assertEqual([json.loads(x) for x in path.read_text().splitlines()],[value])
@@ -35,16 +35,16 @@ class SelectionOutputTests(unittest.TestCase):
 
     def test_stdio_pipe_and_readonly_are_rejected(self):
         for fd in [0,1,2,-1]:
-            with self.subTest(fd=fd),self.assertRaises(ValueError): m.validate_selection_fd(fd)
+            with self.subTest(fd=fd),self.assertRaises(ValueError): m.validate_observation_fd(fd)
         r,w=os.pipe()
         try:
-            with self.assertRaises(ValueError): m.validate_selection_fd(w)
+            with self.assertRaises(ValueError): m.validate_observation_fd(w)
         finally: os.close(r);os.close(w)
         with tempfile.TemporaryFile() as file:
-            with self.assertRaises(ValueError): m.validate_selection_fd(file.fileno())
+            with self.assertRaises(ValueError): m.validate_observation_fd(file.fileno())
             readonly=os.open('/dev/null',os.O_RDONLY)
             try:
-                with self.assertRaises(ValueError): m.validate_selection_fd(readonly)
+                with self.assertRaises(ValueError): m.validate_observation_fd(readonly)
             finally: os.close(readonly)
 
     def test_invalid_observer_never_starts_child(self):

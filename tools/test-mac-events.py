@@ -38,7 +38,10 @@ def main():
         (contents / 'Info.plist').write_bytes(plistlib.dumps({
             'CFBundleExecutable': executable.name, 'CFBundleIdentifier': 'local.meltype.EventTests',
             'CFBundlePackageType': 'APPL'}))
-        filenames = ['NativeCore.swift', 'InputController.swift', 'KeyMapping.swift', 'MacUserDictionary.swift']
+        filenames = [
+            'NativeCore.swift', 'InputController.swift', 'KeyMapping.swift', 'MacUserDictionary.swift',
+            'ModeShortcuts.swift', 'ModeIndicator.swift', 'ModeServices.swift', 'InputSourceRegistration.swift',
+        ]
         if args.real_converter:
             package = root / 'package'
             target = package / 'Sources/EventTests'

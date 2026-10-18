@@ -172,6 +172,10 @@ public static unsafe class Exports
     [UnmanagedCallersOnly(EntryPoint = "meltype_data_directory")]
     public static byte* DataDirectory() => ToUtf8(Config.AppPaths.DataDirectory);
 
+    /// <summary>Meltype.Core の版 (csproj の Version)。meltype_free で解放する。</summary>
+    [UnmanagedCallersOnly(EntryPoint = "meltype_version")]
+    public static byte* Version() => ToUtf8(Config.ProjectInfo.CoreVersion);
+
     /// <summary>
     /// 不具合報告を開く URL (OS・版・実行環境を入れたもの)。platform は "Mac" か "Linux"。meltype_free で解放する。
     /// </summary>

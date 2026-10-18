@@ -152,6 +152,12 @@ for testing, not normal use. Font files are not copied into this repository.
 
 ## Optional shared Proposal port
 
+The source-reference input goal uses this thin HTTP connection. Main removed it
+for an unrelated VersaPro configuration that had not enabled it; the correction
+in issue #26 (comment 6246990132) keeps the generic Core Proposal port and its
+operational HTTP connection. This integration retains that use without replacing
+the current upstream Core or changing default capture.
+
 `MELTYPE_PROPOSAL_URL` explicitly enables local HTTP. With it unset, no provider
 request is sent. The wire is request `{generation, raw}` and response
 `{generation, raw, proposals}` preserving each original `id`, `representation`,
