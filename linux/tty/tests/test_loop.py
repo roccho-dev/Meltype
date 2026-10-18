@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Regression cases for the real transport loop, not a bcon/visual proof."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -93,6 +94,77 @@ class LoopRegression(unittest.TestCase):
             self.assertEqual(got,reply)
             self.assertEqual(b.view,{'text':'pending'})
             self.assertEqual(n.calls,[])
+
+    def test_ready_split_reply_never_enters_native_after_escape_deadline(self):
+        # Exercise run's actual select/read/expire order on a PTY. The clock
+        # boundary is controlled; this is not evidence about natural latency.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td)
+            child_ready, tail_ready = path/'child-ready', path/'tail-ready'
+            received, calls = path/'received', path/'calls'
+            reply = b'\x1b_Gi=424242;OK\x1b\\'
+            child = f'''import os,select,time,tty
+from pathlib import Path
+tty.setraw(0)
+Path({str(child_ready)!r}).touch()
+data=bytearray(); deadline=time.monotonic()+5
+while len(data)<{len(reply)} and time.monotonic()<deadline:
+ if select.select([0],[],[],.02)[0]: data.extend(os.read(0,4096))
+Path({str(received)!r}).write_bytes(data)
+'''
+            code = f'''import json,select,sys
+from pathlib import Path
+import meltype_tty as m
+state={{'bridge':None,'forced':False}}
+original_init=m.InputBridge.__init__
+original_expire=m.InputBridge.expire
+original_select=select.select
+def initialize(self,*args,**kwargs):
+ original_init(self,*args,**kwargs); state['bridge']=self
+def ready(readers,writers,errors,timeout=None):
+ bridge=state['bridge']
+ if 0 in readers and bridge is not None and bridge.escape==b'\x1b' and not state['forced']:
+  Path({str(tail_ready)!r}).touch()
+  result=original_select([0],[],[],3)
+  if 0 not in result[0]: raise AssertionError('tail did not become readable')
+  state['forced']=True
+  return result
+ return original_select(readers,writers,errors,timeout)
+def expire(self,now=None,**kwargs):
+ if state['forced'] and self.escape==b'\x1b': now=self.escape_started+.061
+ return original_expire(self,now,**kwargs)
+m.InputBridge.__init__=initialize
+m.InputBridge.expire=expire
+select.select=ready
+class Native:
+ def __init__(self): self.calls=[]
+ def key(self,*args):
+  self.calls.append(args)
+  return {{'consumed':False,'commits':[],'view':None}}
+ def close(self): Path({str(calls)!r}).write_text(json.dumps(self.calls))
+sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False))
+'''
+            master, slave = os.openpty()
+            original = termios.tcgetattr(slave)
+            proc = subprocess.Popen([sys.executable, '-c', code], stdin=slave,
+                stdout=slave, stderr=slave, env={**os.environ, 'PYTHONPATH':str(ROOT)})
+            def wait_for(marker):
+                deadline = time.monotonic()+4
+                while not marker.exists() and proc.poll() is None and time.monotonic()<deadline:
+                    time.sleep(.01)
+                self.assertTrue(marker.exists(), f'missing readiness: {marker.name}')
+            try:
+                wait_for(child_ready)
+                os.write(master, reply[:1])
+                wait_for(tail_ready)
+                os.write(master, reply[1:])
+                self.assertEqual(proc.wait(timeout=7), 0)
+                self.assertEqual(received.read_bytes(), reply)
+                self.assertEqual(json.loads(calls.read_text()), [], 'terminal reply entered Native')
+                self.assertEqual(termios.tcgetattr(slave), original)
+            finally:
+                if proc.poll() is None: proc.terminate(); proc.wait(2)
+                os.close(master); os.close(slave)
 
     def test_arrow_inside_composition_is_given_to_native(self):
         class Choosing(Native):
