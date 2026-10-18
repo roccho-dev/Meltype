@@ -68,7 +68,30 @@ def run_case(expected, prefix, provider=None, release_provider=None):
         candidate_count=0
         candidate_pixels=None
         confirmed=False
+        termination_requested=False
+        before_termination_status=None
+        cleanup_output=b''
         deadline=time.monotonic()+15
+        def preserve_failure():
+            # This test uses only the controlled fixture above. Keep the real
+            # PTY bytes and rendered frames through the existing failure artifact
+            # path, without changing input order, deadlines or success criteria.
+            directory=Path(os.environ.get('RUNNER_TEMP',tempfile.gettempdir()))/'meltype-bcon'
+            directory.mkdir(exist_ok=True)
+            record={'gate':'native-display-failure','provider':'controlled' if provider else 'native Mozc',
+                'sent':sent,'selected':selected,'probed':probed,'confirmed':confirmed,
+                'queries':queries,'returncode':process.poll(),
+                'terminationRequested':termination_requested,'beforeTerminationStatus':before_termination_status,
+                'cleanupOutputBase64':base64.b64encode(cleanup_output).decode(),
+                'outputBytes':len(output),'outputSha256':hashlib.sha256(output).hexdigest(),
+                'outputBase64':base64.b64encode(output).decode(),'external_models':'NOT_CALLED'}
+            (directory.parent/'meltype-bcon.log').write_text(json.dumps(record)+'\n')
+            try:
+                frames=images(output)
+                for index,image in enumerate(frames):
+                    image.save(directory/f'native-display-failure-{index}.png')
+            except (OSError, ValueError):
+                pass  # The exact raw output above remains the primary evidence.
         try:
             while time.monotonic()<deadline:
                 if select.select([master],[],[],.05)[0]:
@@ -105,6 +128,8 @@ def run_case(expected, prefix, provider=None, release_provider=None):
                             confirmed=True
                 if process.poll() is not None: break
             if process.poll() is None:
+                before_termination_status=process.poll()
+                termination_requested=True
                 process.terminate();process.wait(2)
                 raise RuntimeError('real CLI proof timeout')
             assert process.returncode==0,(process.returncode,output[-500:])
@@ -131,6 +156,20 @@ def run_case(expected, prefix, provider=None, release_provider=None):
                 'selections':selections,'selection_is_effect_receipt':False,
                 'child_text':expected,'exit_status':process.returncode,'terminal_restored':True,
                 'bcon':'NOT_RUN','external_models':'NOT_CALLED'}),flush=True)
+        except BaseException:
+            try:
+                # Evidence only after the original failure; no extra input or
+                # pre-assert reads that would alter the scenario's timing.
+                for _ in range(16):
+                    if not select.select([master],[],[],0)[0]: break
+                    try: part=os.read(master,65536)
+                    except OSError: break
+                    if not part: break
+                    cleanup_output+=part
+                preserve_failure()
+            except BaseException as collector_error:
+                print('native-display evidence collection failed: '+type(collector_error).__name__,flush=True)
+            raise
         finally:
             if process.poll() is None: process.kill();process.wait()
             os.close(selection_fd);os.close(master);os.close(slave)
