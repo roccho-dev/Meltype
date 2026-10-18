@@ -18,7 +18,7 @@ Linux run `38350288872` でChrome/cdp-ttyなしの実bcon＋Bash/nano試験が�
 
 | 移行元 | 分割後の責務 |
 |---|---|
-| `linux/tty/meltype_tty.py`, `kitty_display.py`, `proposal_transport.py` | Bが入力・表示・寿命・観測可能な入力保護を所有。別の画面モデル・候補計算は増やさない |
+| `linux/tty/meltype_tty.py`, `kitty_display.py` | Bが入力・表示・寿命・観測可能な入力保護を所有。別の画面モデル・候補計算は増やさない |
 | `src/Meltype.Core/Composition/MeltypeSession.cs`, `src/Meltype.Mac.Native/ProposalExports.cs` | 既存Coreと最小の公開接点を維持 |
 | TTY回帰・実Native・実CLI試験 | Bの同版必須checkへ継承 |
 | `linux/tty/tests/bcon.py` / `bcon.nix` | BはShell/Editor単独。Browser/DOM結合の旧原本はPR #2固定commitに保持し、Cへ引継ぐ |

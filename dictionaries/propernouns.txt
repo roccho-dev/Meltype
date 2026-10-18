@@ -10,7 +10,7 @@ GitHub Meltype GitLab Bitbucket Docker Kubernetes Azure AWS Heroku Vercel Netlif
 YouTube Twitter Facebook Instagram TikTok LINE Discord Slack Zoom Teams Notion Figma Canva Miro Trello Jira Confluence
 Netflix Spotify Hulu Disney Prime Twitch Reddit Pinterest LinkedIn Tumblr Medium Substack
 Yahoo Bing DuckDuckGo Baidu Naver Kakao WeChat WhatsApp Telegram Signal Messenger Skype Webex
-ChatGPT OpenAI Claude Anthropic Gemini Copilot Midjourney Perplexity Bard DeepL
+ChatGPT OpenAI Claude Anthropic Gemini Gemma Copilot Midjourney Perplexity Bard DeepL
 iPhone iPad iPod iMac MacBook AirPods Pixel Galaxy Xperia Surface Kindle Echo Alexa Siri Cortana
 Chrome Firefox Safari Edge Opera Brave Vivaldi
 Excel Word PowerPoint Outlook OneDrive OneNote SharePoint Access Visio Dropbox Evernote Box
@@ -75,3 +75,5 @@ ReVanced Lavalink Skeb FANBOX Ryzen RTX Zenfone IntelliSense Unix
 Suica DCafe ProBot Carlbot Disboard TaCZ NSFW
 # 音楽 (アーティスト名。ローマ字として読める・大文字の語 + 日本語に区切れてしまう名前: #303)
 Khalifa Ariana Grande Sheeran Marshmello Beabadoobee Chainsmokers Iann Dior Dobby
+# Issue #268
+DeVito

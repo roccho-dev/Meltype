@@ -14,6 +14,10 @@ if [[ ! -f libMeltypeNative.so || ! -f ibus-engine-meltype ]]; then
     echo "libMeltypeNative.so が見つかりません。zip を展開したフォルダーで実行してください。" >&2
     exit 1
 fi
+if [[ "${1:-}" == "--fcitx5" && ! -f fcitx5/meltype.so ]]; then
+    echo "fcitx5 のアドオン (fcitx5/meltype.so) が見つかりません。fcitx5 の開発用のパッケージ (fcitx5-modules-dev) と cmake を入れてビルドし直すか、--fcitx5 を付けずに実行してください。" >&2
+    exit 1
+fi
 
 # fcitx5 を使っているか (fcitx5 が入っていて、zip に fcitx5 のアドオンがある)。IBus が無く fcitx5 だけなら、IBus は入れない
 use_fcitx5=false

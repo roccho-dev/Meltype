@@ -57,5 +57,6 @@ linux/build-cli.sh --mozc --package  # Mozc のヘルパーも作り直してパ
 ibus restart
 sleep 2
 pkill -f ibus-engine-meltype || true
+/opt/meltype/ibus-engine-meltype --version   # 版だけ確認するとき
 /opt/meltype/ibus-engine-meltype
 ```

@@ -9,24 +9,35 @@ import InputMethodKit
 /// 返ってきた結果 (確定する文字・変換中の表示・候補) を入力欄に反映する。
 /// Info.plist の InputMethodServerControllerClass に書いた名前で、Input Method Kit が作る。
 @objc(MeltypeInputController)
-final class MeltypeInputController: IMKInputController {
+final class MeltypeInputController: IMKInputController, ModeServiceTarget {
     private var session: UnsafeMutableRawPointer?
     private var candidateList: [String] = []
     private var hasMarkedText = false
-    private var codeInput = false
-    private var directInput = false
+    private var codeInput = ModeSelection.shared.current == .code
+    private var directInput = ModeSelection.shared.current == .direct
+    private var mode: MacInputMode { directInput ? .direct : codeInput ? .code : .automatic }
+    private let modeIndicator = ModeIndicator.shared
     private var suggestionPanel: NSPanel?
     private var displayedSuggestion: String?
     private var dictionaryObserver: NSObjectProtocol?
 
     override func activateServer(_ sender: Any!) {
         super.activateServer(sender)
+        ModeServices.shared.activate(self)
+        let selected = ModeSelection.shared.current
+        if mode != selected {
+            directInput = selected == .direct
+            codeInput = selected == .code
+        }
+        NativeCore.shared.setDirect(session, directInput)
         NativeCore.shared.setCodeInput(session, codeInput)
     }
 
     override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         super.init(server: server, delegate: delegate, client: inputClient)
         session = NativeCore.shared.createSession()
+        NativeCore.shared.setDirect(session, directInput)
+        NativeCore.shared.setCodeInput(session, codeInput)
         dictionaryObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("MeltypeUserDictionaryChanged"), object: nil, queue: .main
         ) { [weak self] _ in
@@ -63,12 +74,14 @@ final class MeltypeInputController: IMKInputController {
             apply(NativeCore.shared.commit(session), to: client)
             directInput = true
             NativeCore.shared.setDirect(session, true)
+            rememberMode(caret: modeIndicatorCaret(client))
             return true
         case kVK_JIS_Kana:
             directInput = false
             codeInput = false
             NativeCore.shared.setCodeInput(session, false)
             NativeCore.shared.setDirect(session, false)
+            rememberMode(caret: modeIndicatorCaret(client))
             return true
         default:
             break
@@ -107,6 +120,7 @@ final class MeltypeInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
+        ModeServices.shared.deactivate(self)
         commitComposition(sender)
         candidatesWindow?.hide()
         suggestionPanel?.orderOut(nil)
@@ -161,32 +175,76 @@ final class MeltypeInputController: IMKInputController {
             item.state = selected ? .on : .off
         }
         menu.addItem(.separator())
+        let indicator = menu.addItem(withTitle: "入力モードをミニウィンドウで表示", action: #selector(toggleModeIndicator(_:)), keyEquivalent: "")
+        indicator.target = self
+        indicator.state = ModeIndicatorSettings.shared.isEnabled ? .on : .off
         let importItem = menu.addItem(withTitle: "macOSのユーザー辞書を取り込む…", action: #selector(importUserDictionary(_:)), keyEquivalent: "")
         importItem.target = self
+        let configItem = menu.addItem(withTitle: "Meltype の設定ファイル (config.json) を開く…", action: #selector(openConfigFile(_:)), keyEquivalent: "")
+        configItem.target = self
         menu.addItem(withTitle: "Meltype のデータフォルダを開く (設定・ユーザー辞書)", action: #selector(openDataFolder(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "不具合の報告・提案… (Mac 版はプレビュー版です)", action: #selector(openReport(_:)), keyEquivalent: "")
         return menu
     }
 
-    private func selectMode(direct: Bool, code: Bool) {
-        commitComposition(client())
+    private func selectMode(direct: Bool, code: Bool, showIndicator: Bool = false) {
+        let inputClient = client()
+        let caret = inputClient.flatMap { modeIndicatorCaret($0) }
+        commitComposition(inputClient)
         directInput = direct
         codeInput = code
         NativeCore.shared.setDirect(session, direct)
         NativeCore.shared.setCodeInput(session, code)
+        rememberMode(caret: inputClient.flatMap { modeIndicatorCaret($0) } ?? caret, showIndicator: showIndicator)
+    }
+
+    /// メニューと同じく、現在の表示を確定してからモードとミニウィンドウを更新する。
+    func selectModeFromService(_ action: ModeShortcutAction) -> Bool {
+        guard client() != nil else { return false }
+        let selected = action.mode(after: mode)
+        selectMode(direct: selected == .direct, code: selected == .code, showIndicator: true)
+        return true
+    }
+
+    private func rememberMode(caret: NSRect?, showIndicator: Bool = true) {
+        ModeSelection.shared.select(mode)
+        if showIndicator {
+            modeIndicator.show(mode, caret: caret)
+        } else {
+            modeIndicator.hide()
+        }
+    }
+
+    private func modeIndicatorCaret(_ client: IMKTextInput) -> NSRect? {
+        // IMK のインライン位置。0 はインラインセッションがない場合の現在の選択を表す。
+        let marked = client.markedRange()
+        let index = marked.location == NSNotFound ? 0 : marked.length
+        var rectangle = NSRect.zero
+        _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &rectangle)
+        return ModeIndicator.validCaret(rectangle) ? rectangle : nil
     }
 
     @objc private func selectAutomatic(_ sender: Any?) { selectMode(direct: false, code: false) }
     @objc private func selectDirect(_ sender: Any?) { selectMode(direct: true, code: false) }
     @objc private func selectCode(_ sender: Any?) { selectMode(direct: false, code: true) }
 
+    @objc private func toggleModeIndicator(_ sender: Any?) {
+        ModeIndicatorSettings.shared.isEnabled.toggle()
+        modeIndicator.hide()
+    }
+
     @objc private func importUserDictionary(_ sender: Any?) {
         commitComposition(client())
+        // 入力メソッドは背景のアプリなので、前面に出さないと、開いた画面がほかのウィンドウに触れた瞬間に消える (issue #716)
+        NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
+        panel.level = .floating
+        panel.makeKeyAndOrderFront(nil)
         guard panel.runModal() == .OK, let source = panel.url,
               let directory = NativeCore.shared.dataDirectory else { return }
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         do {
             let count = try MacUserDictionary.importFile(source, directory: directory)
@@ -202,6 +260,16 @@ final class MeltypeInputController: IMKInputController {
 
     @objc private func openReport(_ sender: Any?) {
         guard let url = NativeCore.shared.reportUrl else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// 設定ファイル (Windows 版と共通の config.json) を、無ければ空の設定で作ってから、既定のエディターで開く (issue #508)。
+    @objc private func openConfigFile(_ sender: Any?) {
+        guard let directory = NativeCore.shared.dataDirectory else { return }
+        let url = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("config.json")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? "{\n}\n".write(to: url, atomically: true, encoding: .utf8)
+        }
         NSWorkspace.shared.open(url)
     }
 

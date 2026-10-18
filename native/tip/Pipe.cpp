@@ -158,8 +158,10 @@ bool PipeClient::Wait(OVERLAPPED& overlapped, DWORD timeoutMs, DWORD& transferre
     return GetOverlappedResult(pipe_, &overlapped, &transferred, FALSE) != FALSE || GetLastError() == ERROR_MORE_DATA;
 }
 
-bool PipeClient::Transact(const std::string& request, std::string& response, DWORD timeoutMs) {
+bool PipeClient::Transact(const std::string& request, std::string& response, DWORD timeoutMs, bool optional) {
     response.clear();
+    // 前からのつながりを使う (Meltype.exe を起動し直していたら、書き込みで切れていたと分かる)
+    bool reused = pipe_ != INVALID_HANDLE_VALUE;
     if (!Connect()) return false;
     ULONGLONG deadline = GetTickCount64() + timeoutMs;
     auto remaining = [&]() -> DWORD {
@@ -172,15 +174,22 @@ bool PipeClient::Transact(const std::string& request, std::string& response, DWO
     ResetEvent(event_);
     DWORD transferred = 0;
     if (!WriteFile(pipe_, request.data(), static_cast<DWORD>(request.size()), nullptr, &overlapped) && GetLastError() != ERROR_IO_PENDING) {
-        TipLog(L"パイプに書けません: %lu", GetLastError());
+        DWORD error = GetLastError();
+        TipLog(L"パイプに書けません: %lu", error);
         Close();
+        // 前の Meltype.exe とのつながりが切れていた (起動し直した): まだ何も送っていないので、つなぎ直して 1 回だけ送り直す。
+        // 送り直さないと、起動し直した後の最初のキーが、応答が無いときと同じく打った文字のまま入る
+        if (reused && (error == ERROR_NO_DATA || error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED)) {
+            TipLog(L"つなぎ直して送り直します");
+            return Transact(request, response, remaining(), optional);
+        }
         return false;
     }
     if (!Wait(overlapped, remaining(), transferred)) {
         // 読み取りが時間内に終わらないときと同じく、応答しない Meltype.exe をしばらく待たない
         TipLog(L"パイプへの書き込みが終わりません");
         Close();
-        retryAfter_ = GetTickCount64() + 3000;
+        if (!optional) retryAfter_ = GetTickCount64() + 3000;
         return false;
     }
 
@@ -199,10 +208,13 @@ bool PipeClient::Transact(const std::string& request, std::string& response, DWO
             return false;
         }
         if (!Wait(overlapped, remaining(), transferred)) {
-            // 応答しない Meltype.exe を毎回待つと、どのアプリでも打鍵のたびに止まるので、しばらくつながない
+            // 応答しない Meltype.exe を毎回待つと、どのアプリでも打鍵のたびに止まるので、しばらくつながない。
+            // ただし optional の問い合わせは待つ時間が短く、Meltype.exe の画面のスレッドが少しふさがっただけでも時間切れになる。
+            // しばらくつながないと、その間に打ったキーが打った文字のまま入るので、閉じるだけにする
+            // (閉じないと、遅れて来た応答を次の要求の応答として読んでしまう)
             TipLog(L"Meltype.exe の応答が時間内に来ません");
             Close();
-            retryAfter_ = GetTickCount64() + 3000;
+            if (!optional) retryAfter_ = GetTickCount64() + 3000;
             return false;
         }
         response.append(buffer, transferred);

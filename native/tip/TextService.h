@@ -82,7 +82,7 @@ private:
     ~TextService();
 
     // test: OnTestKeyDown から (入力欄の種類を読んだ結果を、続く OnKeyDown で使うために覚える)
-    bool WouldEat(ITfContext* context, UINT vk, wchar_t& ch, bool test);
+    bool WouldEat(ITfContext* context, UINT vk, LPARAM lParam, wchar_t& ch, bool test);
     void ForgetSecretField();
     bool IsReinjected(UINT vk);
     bool ServerReady();
@@ -98,8 +98,8 @@ private:
     std::string PendingPassed();
     // 応答の code / english を入力モードの表示に反映する
     void ApplyMode(const JsonValue& reply);
-    // 要求を送って応答を読む。失敗したら false
-    bool Request(const std::string& json, JsonValue& reply, DWORD timeoutMs = 800);
+    // 要求を送って応答を読む。失敗したら false (optional は PipeClient::Transact と同じ)
+    bool Request(const std::string& json, JsonValue& reply, DWORD timeoutMs = 800, bool optional = false);
     // 応答を入力欄に反映する (編集セッションの中で呼ぶ)
     void Apply(TfEditCookie ec, ITfContext* context, const JsonValue& reply);
     // range の前の count 文字が expect (前に確定した文字) なら、range をそこまで広げる。違えば false
@@ -119,7 +119,7 @@ private:
     // アプリが確定した打ちかけの文字を、変換中に戻す (戻せなければ確定したことにする)。context が null なら確定したことにする
     void ResumeOrCommit(ITfContext* context);
     void CommitInSession(TfEditCookie ec, ITfContext* context, bool keepAppCaret);
-    void SelectCandidate(int index);
+    void SelectCandidate(int index, bool prediction);
     void Reinject(UINT vk);
     void SurroundingText(TfEditCookie ec, ITfContext* context, std::wstring& before, std::wstring& after);
     bool ContextDisabled(ITfContext* context);
@@ -149,6 +149,8 @@ private:
     PipeClient pipe_;
     std::string sid_;
     bool serverActive_ = false;
+    bool directDetection_ = false; // 英数状態でもローマ字検知が有効 (Meltype.exe の応答)
+    bool directEnglishWord_ = false;
     ULONGLONG lastHello_ = 0;
     bool open_ = true;
     bool codeApp_ = false;         // コードエディター・ターミナル (Meltype.exe の応答の code)
@@ -195,6 +197,8 @@ private:
     Microsoft::WRL::ComPtr<ITfContext> secretContext_;
     ULONGLONG secretTime_ = 0;
     int secretResult_ = -1;
+    bool secretPrivate_ = false;
+    bool privateField_ = false;    // 前に入力欄の種類を読んだとき、入力を覚えないように求める入力欄 (IS_PRIVATE) だった
     const wchar_t* scopeSource_ = nullptr;  // 入力欄の種類を前に読んだところ (ログ用)
     bool keepAppCaret_ = false;    // 確定したあと、キャレットを動かさない (クリック・別の入力欄で確定したとき)
     bool deactivated_ = false;     // 終わった後は Meltype.exe とやり取りしない

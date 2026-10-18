@@ -35,7 +35,9 @@ def main():
         subprocess.run(["xcrun", "swiftc", "-swift-version", "5",
                         str(repo / "tools/test-mac-boundaries.swift"),
                         *[str(repo / "mac/Sources/MeltypeIME" / name)
-                          for name in ("NativeCore.swift", "InputController.swift", "KeyMapping.swift", "MacUserDictionary.swift")],
+                          for name in ("NativeCore.swift", "InputController.swift", "KeyMapping.swift",
+                                       "MacUserDictionary.swift", "ModeShortcuts.swift", "ModeIndicator.swift",
+                                       "ModeServices.swift", "InputSourceRegistration.swift")],
                         "-framework", "InputMethodKit", "-framework", "Carbon", "-o", str(executable)], check=True)
         data = root / "data"
         data.mkdir()
