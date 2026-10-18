@@ -62,12 +62,13 @@ def candidates(name, before):
 def contents(name):
     return machine.succeed("cat /run/meltype-proof/" + name)
 
-def saved_editor(expected):
+def saved_editor(expected, name="editor-text"):
     machine.send_key("ctrl-o")
     machine.send_key("ret")
     # Compare bytes, including final newlines. Shell command substitution
     # strips trailing LF and can even accept a missing file for empty expected.
-    code = ("from pathlib import Path; actual = Path('/run/meltype-proof/editor-text').read_bytes(); "
+    path = "/run/meltype-proof/" + name
+    code = (f"from pathlib import Path; actual = Path({path!r}).read_bytes(); "
         f"expected = bytes.fromhex({expected.encode('utf-8').hex()!r}); "
         "assert actual == expected, (actual, expected)")
     machine.wait_until_succeeds("python3 -c " + shlex.quote(code))
@@ -359,10 +360,127 @@ machine.send_key("ret")
 machine.wait_until_succeeds("test \"$(grep -c r-marker /run/meltype-proof/preview-r)\" = 2")
 machine.send_chars("exit\n")
 finished("preview")
+
+# Original B2: use bcon's actual clipboard key and font/grid/PTY resize path.
+# Supplying the clipboard is preparation; only child bytes and Editor saves
+# establish paste effects. Geometry is read from the fixed child's own fd0,
+# never the test driver's separate shell or the outer Linux VT.
+def clipboard(text):
+    bcon_pid = machine.succeed("systemctl show -p MainPID --value meltype-test-console.service").strip()
+    assert bcon_pid.isdecimal() and int(bcon_pid) > 1, bcon_pid
+    path = "/run/meltype-test-console/bcon_clipboard_" + bcon_pid
+    machine.succeed("printf %s " + shlex.quote(text) + " > " + path)
+    machine.send_key("ctrl-shift-v")
+
+
+def geometry(pid):
+    code = ("import fcntl,json,os,struct,termios; "
+        f"pid={pid}; fd=os.open(f'/proc/{pid}/fd/0',os.O_RDONLY|os.O_NOCTTY); "
+        "print(json.dumps({'pid':pid,'tty':os.ttyname(fd),"
+        "'size':struct.unpack('HHHH',fcntl.ioctl(fd,termios.TIOCGWINSZ,b'\\0'*8))})); os.close(fd)")
+    return json.loads(machine.succeed("python3 -c " + shlex.quote(code)))
+
+
+def font_resize(pid, original, reset=False):
+    # QEMU keycode 0x0D is '=' in the pinned test driver's CHAR_TO_KEY.
+    machine.send_key("ctrl-0" if reset else "ctrl-0x0D")
+    deadline = time.monotonic() + 15
+    while True:
+        current = geometry(pid)
+        assert current["pid"] == original["pid"] and current["tty"] == original["tty"], current
+        changed = current["size"][:2] != original["size"][:2]
+        if changed != reset:
+            return current
+        assert time.monotonic() < deadline, (original, current, reset)
+        time.sleep(.2)
+
+
+paste_text = "貼付け 日本語\nsecond\tline"
+reader = put("read-paste", "touch /run/meltype-proof/paste-ready\n"
+    "IFS= read -er -p 'PASTE> ' value\nprintf %s \"$value\" > /run/meltype-proof/paste-text\n")
+launch("paste", "meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+machine.wait_until_succeeds("test -e /run/meltype-proof/paste-ready")
+scanout("B-paste-shell-before")
+clipboard(paste_text)
+scanout("B-paste-shell-inserted")
+machine.fail("test -e /run/meltype-proof/paste-text")
+machine.send_key("ret")
+finished("paste")
+# This exact multiline result, not the earlier file-absence check alone, rejects
+# early LF submission: one read would otherwise have saved only the first line.
+assert contents("paste-text") == paste_text, contents("paste-text")
+
+reader = put("read-resize", "printf %s \"$$\" > /run/meltype-proof/resize-pid\n"
+    "tty > /run/meltype-proof/resize-tty\ntouch /run/meltype-proof/resize-ready\n"
+    "IFS= read -er -p 'RESIZE> ' value\nprintf %s \"$value\" > /run/meltype-proof/resize-text\n")
+launch("resize", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal "
+    "meltype-tty --raw-text --compose --selection-fd 3 -- bash --noprofile --norc "
+    + reader + " 3>>/run/meltype-proof/resize-selection")
+machine.wait_until_succeeds("test -e /run/meltype-proof/resize-ready")
+shell_pid = int(contents("resize-pid"))
+shell_original = geometry(shell_pid)
+assert shell_original["tty"] == contents("resize-tty").strip(), shell_original
+before = scanout("B-resize-shell-before")
+machine.send_chars("u")
+shown = candidates("B-resize-shell-candidates", before)
+shell_smaller = font_resize(shell_pid, shell_original)
+resized = candidates("B-resize-shell-smaller", before)
+assert ImageChops.difference(shown, resized).getbbox()
+shell_restored = font_resize(shell_pid, shell_original, reset=True)
+restored = candidates("B-resize-shell-restored", before)
+machine.send_key("down")
+time.sleep(.2)
+assert ImageChops.difference(restored, scanout("B-resize-shell-selected")).getbbox()
+machine.send_key("ret")
+machine.fail("test -e /run/meltype-proof/resize-text")
+machine.send_key("ret")
+finished("resize")
+assert contents("resize-text") == "乙候補", contents("resize-text")
+resize_selection = [json.loads(line) for line in contents("resize-selection").splitlines()]
+assert len(resize_selection) == 1, resize_selection
+assert resize_selection[0]["proposal"]["id"] == "b", resize_selection
+assert resize_selection[0]["proposal"]["representation"] == "乙候補", resize_selection
+# Without the actual Down effect the first candidate would be 甲候補. The
+# existing one-shot observation and the fixed child's bytes must agree.
+
+paste_editor = "貼付け 日本語\nsecond\tline\n"
+launch("paste-editor", "meltype-tty --raw-text --compose -- nano --ignorerc --nonewlines /run/meltype-proof/paste-editor-text")
+machine.wait_until_succeeds("pgrep -x nano")
+editor_pid = int(machine.succeed("pgrep -x nano").strip())
+editor_original = geometry(editor_pid)
+# A distinct, initially absent file preserves the earlier Editor evidence.
+machine.fail("test -e /run/meltype-proof/paste-editor-text")
+clipboard(paste_editor)
+scanout("B-paste-editor-inserted")
+saved_editor(paste_editor, "paste-editor-text")
+editor_paste_actual = contents("paste-editor-text")
+before = scanout("B-resize-editor-before")
+machine.send_chars("nihongo ")
+shown = candidates("B-resize-editor-candidates", before)
+editor_smaller = font_resize(editor_pid, editor_original)
+resized = candidates("B-resize-editor-smaller", before)
+assert ImageChops.difference(shown, resized).getbbox()
+editor_restored = font_resize(editor_pid, editor_original, reset=True)
+candidates("B-resize-editor-restored", before)
+machine.send_key("ret")
+saved_editor(paste_editor + "日本語", "paste-editor-text")
+machine.send_key("ctrl-x")
+finished("paste-editor")
+paste_resize = {"shell_paste":contents("paste-text"),
+    "editor_paste_expected":paste_editor,"editor_paste_actual":editor_paste_actual,
+    "shell_geometry":[shell_original,shell_smaller,shell_restored],
+    "editor_geometry":[editor_original,editor_smaller,editor_restored],
+    "shell_after_resize":contents("resize-text"),
+    "shell_selected":resize_selection,
+    "editor_after_resize":contents("paste-editor-text"),
+    "resize_mechanism":"existing bcon font/grid/PTY; not DRM hotplug",
+    "paste_mechanism":"existing bcon shared clipboard + CtrlShiftV"}
+print("B-PASTE-RESIZE " + json.dumps(paste_resize, ensure_ascii=False), flush=True)
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
     "diag_p19e":diagnosis,
+    "paste_resize":paste_resize,
     "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,
