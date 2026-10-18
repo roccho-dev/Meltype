@@ -5,6 +5,16 @@ It has no Chrome/cdp-tty test dependency. Conversion remains the existing
 Meltype Core/NativeAOT/Mozc implementation. There is no SKK, Fcitx5, second
 ranker, daemon, or shadow terminal grid. Kitty images display candidates.
 
+A long active candidate wraps using the actual display font within the existing
+eight-row panel budget and the space above or below the current cursor line.
+If even the minimum panel cannot fit there, active selection stops; a passive
+preview stays hidden. Core still owns navigation and the original selection;
+the painter changes no Proposal data. Short candidate lists keep their order.
+Text exceeding the available rows or display limit is marked with an ellipsis,
+not silently painted beyond the image. This does not promise every long meaning
+or URL fits at every terminal size; actual reference scanouts are checked apart
+from byte-exact selection and child effects.
+
 ## Adopted main compatibility
 
 The shared SessionResult encoder is the main encoder: one `notes` array,

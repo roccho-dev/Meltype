@@ -193,7 +193,25 @@ class KittyDisplay:
     def paint(self,view,passive=False,left=None):
         from PIL import Image, ImageDraw
         def plain(value):
-            return ''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))[:240]
+            text=''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))
+            return text[:240]+('…' if len(text)>240 else '')
+        columns=min(self.cols,60)
+        width=columns*10; line_height=26
+        available=width-8
+        def fit(text):
+            if self.font.getlength(text)<=available: return text
+            while text and self.font.getlength(text+'…')>available: text=text[:-1]
+            return text+'…'
+        def wrapped(text,prefix,limit):
+            result=[]
+            while text and len(result)<limit:
+                take=len(text)
+                while take and self.font.getlength(prefix+text[:take])>available: take-=1
+                if not take: return result+[fit(prefix+'…')]
+                result.append(prefix+text[:take])
+                text=text[take:];prefix='  '
+            if text: result[-1]=fit(result[-1]+'…')
+            return result
         candidates=view.get('candidates') or []
         selected=view.get('selectedIndex',-1)
         # Core supplies the selected meaning and each candidate's evidence.
@@ -203,28 +221,39 @@ class KittyDisplay:
         notes=view.get('notes') or []
         if 0<=selected<len(notes) and notes[selected]:
             details.append('evidence: '+plain(notes[selected]))
-        budget=min(self.rows,8)
+        row,col=self.cursor
+        space=row-1 if passive else max(row-1,self.rows-row)
+        budget=min(space,8)
+        if budget<3:
+            if passive: return b''
+            raise ValueError('candidate panel cannot fit without covering the active cursor line')
         details=details[:max(0,budget-3)]
         count=min(5,max(1,budget-2-len(details)))
         page=max(0,selected)//count*count
         # A stale preview (#19) belongs to an earlier word: labelled with that word and "…", drawn dimmed.
         stale=bool(passive and view.get('stale'))
-        lines=[plain(view.get('text',''))+(' …' if stale else '')]
-        lines += [('▶ ' if i==selected else '  ')+plain(candidates[i]) for i in range(page,min(page+count,len(candidates)))]
+        lines=[fit(plain(view.get('text',''))+(' …' if stale else ''))]
+        active=max(0,selected)
+        prefix='▶ ' if active==selected else '  '
+        if active<len(candidates) and self.font.getlength(prefix+plain(candidates[active]))>available:
+            # Show the active reference's identifying suffix instead of only
+            # clipping its common URL prefix. Navigation still belongs to Core;
+            # this changes no Proposal or selection. Keep the bounded panel.
+            if len(candidates)>1: prefix+=f'{active+1}/{len(candidates)} '
+            lines += wrapped(plain(candidates[active]),prefix,budget-2-len(details))
+        else:
+            lines += [fit(('▶ ' if i==selected else '  ')+plain(candidates[i])) for i in range(page,min(page+count,len(candidates)))]
         # The Core's view always has its own (Windows) hint; only a preview draws one of its own.
-        lines += details+[plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel']
-        row,col=self.cursor
+        lines += [fit(line) for line in details]+[fit(plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel')]
         # A preview stays off the cursor line and below, where the shell edits and lists completions.
         if passive and row<=len(lines): return b''
-        columns=min(self.cols,60)
-        width=columns*10; line_height=26
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
         draw=ImageDraw.Draw(image)
         for i,line in enumerate(lines):
             draw.text((4,i*line_height+2),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
-        top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
+        top=row-len(lines) if row>len(lines) else row+1
         left=left if left is not None else max(1,min(col,self.cols-columns+1))
         self.placed=(top,left,len(lines),columns)
         out=bytearray(f'\x1b[{top};{left}H'.encode())
