@@ -101,7 +101,7 @@ internal static class Checks
     /// 「入力 → 期待」の一覧 (1 行に「入力&lt;Tab&gt;期待」) を確かめて JSON で出す。
     ///   入力がかな (しゃおみ) … 変換の候補に期待した語 (Xiaomi) が出るか
     ///   入力が英字 (nihongowohanasu) … 打って Enter した結果が期待どおりか。期待に漢字が入っていれば、日本語 / 英語の分かれ方だけを比べる
-    ///   (テストでは変換エンジンを使わず漢字にしないため)。カタカナも同じ理由で、ひらがなに直して比べる (ホスティング = ほすてぃんぐ)。
+    ///   (テストでは変換エンジンを使わず漢字にしないため)。カタカナも同じ理由で、ひらがなに直して比べる (ホスティング = ほすてぃんぐ)。そのとき英字の大小は無視する (OEM = oem)。
     /// </summary>
     public static void Expect(string input, string output)
     {
@@ -126,7 +126,11 @@ internal static class Checks
             var actual = k.Host.Document;
             var kanji = expected.Any(c => c is >= '㐀' and <= '鿿');
             var katakana = !kanji && expected.Any(c => c is >= 'ァ' and <= 'ヶ');
-            var ok = kanji ? Words(actual) == Words(expected) : Hiragana(actual) == Hiragana(expected);
+            var ok = kanji
+                ? Words(actual) == Words(expected)
+                : katakana
+                    ? AsciiLower(Hiragana(actual)) == AsciiLower(Hiragana(expected))
+                    : Hiragana(actual) == Hiragana(expected);
             results.Add(new { typed, expected, kind = kanji ? "判定 (英字の部分だけ比べる)" : katakana ? "入力 (カタカナはかなとして比べる)" : "入力", actual, ok });
         }
         File.WriteAllText(output, JsonSerializer.Serialize(results, Json));
@@ -173,6 +177,10 @@ internal static class Checks
     private static string Hiragana(string text) =>
         new(text.Select(c => c is >= 'ァ' and <= 'ヶ' ? (char)(c - 0x60) : c).ToArray());
 
+    /// <summary>カタカナの期待では、英字の大小だけを無視する (OEM = oem)。</summary>
+    private static string AsciiLower(string text) =>
+        new(text.Select(c => c is >= 'A' and <= 'Z' ? (char)(c + 32) : c).ToArray());
+
     /// <summary>英字の語だけを取り出す (日本語 / 英語の分かれ方を比べる)。</summary>
     private static string Words(string text) =>
         string.Join(" ", System.Text.RegularExpressions.Regex.Matches(text, "[A-Za-z][A-Za-z'’-]*").Select(m => m.Value.ToLowerInvariant()));
@@ -208,6 +216,11 @@ internal static class Henkan
             ? new Composition.MozcConverter(helper, ProfileDirectory)
             : null);
     private static readonly Lazy<Composition.TranslationDictionary> Translations = new(Composition.TranslationDictionary.Load);
+
+    /// <summary>MELTYPE_MOZC の Mozc (無ければ null)。性能の計測 (--perf) が控えの使い回しの回数を読むのに使う。</summary>
+    public static Composition.MozcConverter? Engine => Mozc.Value;
+
+    public static Composition.TranslationDictionary TranslationDictionary => Translations.Value;
 
     /// <summary>Windows のテストランナーが Microsoft IME を変換エンジンにするとき (Mozc が無いとき) に入れる。</summary>
     public static Composition.IKanjiConverter? FallbackConverter { get; set; }

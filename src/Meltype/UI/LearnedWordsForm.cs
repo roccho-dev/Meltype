@@ -15,8 +15,8 @@ internal sealed class LearnedWordsForm : Form
 {
     private readonly LanguageMemory _languages;
     private readonly ConversionHistory _conversions;
-    private readonly DataGridView _languageGrid = CreateGrid();
-    private readonly DataGridView _conversionGrid = CreateGrid();
+    private readonly DataGridView _languageGrid = FormControls.ReadOnlyGrid();
+    private readonly DataGridView _conversionGrid = FormControls.ReadOnlyGrid();
     private readonly TextBox _filter = new() { Width = 220, PlaceholderText = "絞り込み (語・読み)" };
     private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
 
@@ -84,27 +84,15 @@ internal sealed class LearnedWordsForm : Form
         Reload();
     }
 
-    private static DataGridView CreateGrid() => new()
-    {
-        Dock = DockStyle.Fill,
-        ReadOnly = true,
-        AllowUserToAddRows = false,
-        AllowUserToDeleteRows = false,
-        SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-        RowHeadersVisible = false,
-        BackgroundColor = SystemColors.Window,
-    };
-
     private void Reload()
     {
         var filter = _filter.Text.Trim();
         _languageGrid.Rows.Clear();
         foreach (var entry in _languages.Entries().Where(e => filter.Length == 0 || e.Word.Contains(filter, StringComparison.OrdinalIgnoreCase)))
         {
-            var row = _languageGrid.Rows.Add(entry.Word, entry.English ? "英語 (英字のまま)" : "日本語 (かな)", entry.Count,
-                entry.Active ? "効いている" : "もう一度で覚える", entry.Used.ToLocalTime().ToString("yyyy/MM/dd"));
-            _languageGrid.Rows[row].Tag = entry.Word;
+            var row = _languageGrid.Rows.Add(entry.Word, (entry.English ? "英語 (英字のまま)" : "日本語 (かな)") + (entry.Context is { } context ? $"・{context}" : ""), entry.Count,
+                entry.Active ? "有効" : "もう一度で覚える", entry.Used.ToLocalTime().ToString("yyyy/MM/dd"));
+            _languageGrid.Rows[row].Tag = entry.EntryKey;
         }
         _conversionGrid.Rows.Clear();
         foreach (var (reading, text, used) in _conversions.Entries().Where(e => filter.Length == 0 || e.Reading.Contains(filter) || e.Text.Contains(filter)))

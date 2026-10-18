@@ -9,10 +9,17 @@
   <a href="https://github.com/roccho-dev/Meltype/releases/latest"><img src="https://img.shields.io/github/v/release/roccho-dev/Meltype?color=5ec4f0" alt="release"></a>
   <a href="https://github.com/roccho-dev/Meltype/releases"><img src="https://img.shields.io/github/downloads/roccho-dev/Meltype/total?color=ff8ab4" alt="downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-7a96f0" alt="license"></a>
+  <a href="https://discord.gg/y44wBbBgHt"><img src="https://img.shields.io/badge/Discord-参加する-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/sponsors/yksr-melt"><img src="https://img.shields.io/badge/Sponsor-応援する-ff8ab4?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></a>
 </p>
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/284759?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-284759" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/284759/daily?language=C%23" alt="yksr-melt%2FMeltype | Trendshift" width="250" height="55"/></a>
+<p align="center" style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
+  <a href="https://trendshift.io/repositories/284759?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-284759" target="_blank" rel="noopener noreferrer">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/284759/daily?language=C%23" alt="yksr-melt%2FMeltype | Trendshift" width="250" height="55"/>
+  </a>
+  <a href="https://trendshift.io/repositories/284759?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-284759" target="_blank" rel="noopener noreferrer">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/284759/weekly?language=C%23" alt="yksr-melt%2FMeltype | Trendshift" width="250" height="55"/>
+  </a>
 </p>
 
 <h3 align="center">半角/全角 キーは、もう押さなくていい！</h3>
@@ -27,6 +34,10 @@
   <a href="docs/USAGE.md">使い方</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/roccho-dev/Meltype/issues/new/choose">不具合の報告・提案</a>
+  &nbsp;·&nbsp;
+  <a href="https://discord.gg/y44wBbBgHt">Discord</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/sponsors/yksr-melt">応援する</a>
 </p>
 
 <p align="center">
@@ -70,6 +81,14 @@ VS Code やターミナルでは英数が基本で、コメントと文字列の
 
 <img src="docs/images/headings/install.svg" alt="インストール" width="480"><br>
 
+<p align="center">
+  <a href="docs/WINDOWS.md"><img src="docs/images/cards/os-windows.svg" alt="Windows" width="30%"></a>
+  <a href="mac/README.md"><img src="docs/images/cards/os-mac.svg" alt="Mac" width="30%"></a>
+  <a href="linux/README.md"><img src="docs/images/cards/os-linux.svg" alt="Linux" width="30%"></a>
+</p>
+
+<p align="center"><sub>カードを押すと、それぞれの OS の README (インストール・使い方・困ったとき) が開きます</sub></p>
+
 1. [Releases](https://github.com/roccho-dev/Meltype/releases/latest) から `Meltype-<version>-windows.zip` をダウンロードして展開
 2. 展開したフォルダーの `Install.cmd` をダブルクリック
 3. タスクトレイに「あ」が出たら準備完了！
@@ -84,7 +103,7 @@ VS Code やターミナルでは英数が基本で、コメントと文字列の
 | | ファイル |
 |---|---|
 | Mac (プレビュー版) | `Meltype-<version>-mac.zip` ([mac/README.md](mac/README.md)) |
-| Linux (プレビュー版) | `Meltype-<version>-linux.zip` (IBus / fcitx5) |
+| Linux (プレビュー版) | `Meltype-<version>-linux.zip` (IBus / fcitx5、[linux/README.md](linux/README.md)) |
 
 Windows 版は `%LOCALAPPDATA%\Programs\Meltype` に入ります。
 Windows 版に必要なのは Windows 10 / 11 (64bit) と Microsoft IME だけで、.NET は同梱しています。
@@ -242,6 +261,27 @@ General Public License for more details.
   </tr>
 </table>
 
+<a name="寄付してくださった方々"></a>
+<img src="docs/images/headings/readme/s06.svg" alt="寄付してくださった方々" height="40">
+
+[GitHub Sponsors](https://github.com/sponsors/yksr-melt) で応援してくださった方々です。開発を続ける力になっています、本当にありがとうございます！
+
+<!-- sponsors:start -->
+<p align="center">
+  <a href="https://github.com/cpthgli"><img src="https://github.com/cpthgli.png?size=120" width="60" alt="@cpthgli" title="@cpthgli"></a>
+  <a href="https://github.com/MuNeNiCK"><img src="https://github.com/MuNeNiCK.png?size=120" width="60" alt="@MuNeNiCK" title="@MuNeNiCK"></a>
+  <a href="https://github.com/whitewater-png"><img src="https://github.com/whitewater-png.png?size=120" width="60" alt="@whitewater-png" title="@whitewater-png"></a>
+  <a href="https://github.com/kumapuni"><img src="https://github.com/kumapuni.png?size=120" width="60" alt="@kumapuni" title="@kumapuni"></a>
+  <a href="https://github.com/Maguro-Tsukiji"><img src="https://github.com/Maguro-Tsukiji.png?size=120" width="60" alt="@Maguro-Tsukiji" title="@Maguro-Tsukiji"></a>
+  <a href="https://github.com/aokuraiauau"><img src="https://github.com/aokuraiauau.png?size=120" width="60" alt="@aokuraiauau" title="@aokuraiauau"></a>
+  <a href="https://github.com/daddydaddy"><img src="https://github.com/daddydaddy.png?size=120" width="60" alt="@daddydaddy" title="@daddydaddy"></a>
+  <a href="https://github.com/Kuraido1018"><img src="https://github.com/Kuraido1018.png?size=120" width="60" alt="@Kuraido1018" title="@Kuraido1018"></a>
+  <a href="https://github.com/overdozer1124"><img src="https://github.com/overdozer1124.png?size=120" width="60" alt="@overdozer1124" title="@overdozer1124"></a>
+  <a href="https://github.com/01mercurylampe"><img src="https://github.com/01mercurylampe.png?size=120" width="60" alt="@01mercurylampe" title="@01mercurylampe"></a>
+</p>
+<!-- sponsors:end -->
+<sub>名前を公開にして応援してくださった方を、毎日自動で載せています (.github/workflows/sponsors.yml)。</sub>
+
 <a name="テスト版で協力してくださった方々"></a>
 <img src="docs/images/headings/readme/s05.svg" alt="テスト版で協力してくださった方々" height="40">
 
@@ -279,6 +319,18 @@ General Public License for more details.
 - 送り方 → [CONTRIBUTING.md](CONTRIBUTING.md)
 - ビルド・仕組み → [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - Mac の CLI ビルド → [docs/MAC-CLI.md](docs/MAC-CLI.md)、WSL / Linux の CLI ビルド → [docs/WSL.md](docs/WSL.md)
+
+<br><br>
+
+<a name="コミュニティ応援"></a>
+<img src="docs/images/headings/community.svg" alt="コミュニティ・応援" width="480"><br>
+
+使い方の相談や雑談は Discord で！ Meltype を気に入ってもらえたら、GitHub Sponsors で応援していただけると開発の励みになります！
+
+<p align="center">
+  <a href="https://discord.gg/y44wBbBgHt"><img src="docs/images/cards/community-discord.svg" alt="Discord" width="40%"></a>
+  <a href="https://github.com/sponsors/yksr-melt"><img src="docs/images/cards/support-sponsors.svg" alt="GitHub Sponsors" width="40%"></a>
+</p>
 
 <br><br>
 

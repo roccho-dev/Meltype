@@ -197,6 +197,16 @@ def drawn_icon(kind, cx, cy):
         "book": f'<path d="M{cx} {cy - 7} c-4 -4 -10 -4 -15 -3 v19 c5 -1 11 -1 15 3 c4 -4 10 -4 15 -3 v-19 c-5 -1 -11 -1 -15 3 z M{cx} {cy - 7} v19" {st}/>',
         # ！ (不具合の報告)
         "exclaim": f'<path d="M{cx} {cy - 13} v16" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/><circle cx="{cx}" cy="{cy + 12}" r="3" fill="#ffffff"/>',
+        # 4 つに分かれた窓 (Windows)
+        "panes": f'<rect x="{cx - 13}" y="{cy - 13}" width="11" height="11" rx="1.5" {st}/><rect x="{cx + 2}" y="{cy - 13}" width="11" height="11" rx="1.5" {st}/><rect x="{cx - 13}" y="{cy + 2}" width="11" height="11" rx="1.5" {st}/><rect x="{cx + 2}" y="{cy + 2}" width="11" height="11" rx="1.5" {st}/>',
+        # ノートパソコン (Mac)
+        "laptop": f'<rect x="{cx - 11}" y="{cy - 11}" width="22" height="15" rx="2.5" {st}/><path d="M{cx - 16} {cy + 9} h32 l-2 4 h-28 z" {st}/>',
+        # 端末 (Linux): 枠と >_
+        "terminal": f'<rect x="{cx - 15}" y="{cy - 12}" width="30" height="24" rx="3.5" {st}/><path d="M{cx - 8} {cy - 4} l5 4 l-5 4 M{cx + 1} {cy + 5} h7" {st}/>',
+        # 吹き出し (Discord で話す)
+        "chat": f'<path d="M{cx - 14} {cy - 11} h28 a3 3 0 0 1 3 3 v14 a3 3 0 0 1 -3 3 h-16 l-7 6 v-6 h-5 a3 3 0 0 1 -3 -3 v-14 a3 3 0 0 1 3 -3 z" {st}/><circle cx="{cx - 7}" cy="{cy - 1}" r="1.8" fill="#ffffff"/><circle cx="{cx}" cy="{cy - 1}" r="1.8" fill="#ffffff"/><circle cx="{cx + 7}" cy="{cy - 1}" r="1.8" fill="#ffffff"/>',
+        # ハート (応援する)
+        "heart": f'<path d="M{cx} {cy + 13} c-9 -7 -16 -12 -16 -19 a8 8 0 0 1 16 -3 a8 8 0 0 1 16 3 c0 7 -7 12 -16 19 z" {st}/>',
         # Pull Request の枝分かれ
         "pr": f'<circle cx="{cx - 8}" cy="{cy - 10}" r="3.5" {st}/><circle cx="{cx - 8}" cy="{cy + 11}" r="3.5" {st}/><circle cx="{cx + 9}" cy="{cy + 11}" r="3.5" {st}/><path d="M{cx - 8} {cy - 6} v13 M{cx + 9} {cy + 7} v-9 a5 5 0 0 0 -5 -5 h-5 M{cx + 2} {cy - 10} l-3 3 l3 3" {st}/>',
     }
@@ -236,6 +246,11 @@ MORE_CARDS = [
     ("contribute-issue", "exclaim", "不具合の報告", ["どのアプリで・何と打って・", "どうなったかを教えてください"], PINK),
     ("contribute-dictionary", "book", "辞書の追加", ["足りない語・社名は", "Pull Request か Issue で"], BLUE),
     ("contribute-code", "pr", "コードで協力", ["バグの修正も新しい機能も", "Pull Request で大歓迎！"], OUTLINE),
+    ("os-windows", "panes", "Windows", ["Windows 10 / 11", "インストーラーで入れるだけ！"], BLUE),
+    ("os-mac", "laptop", "Mac", ["macOS 13 以降の", "入力ソース (プレビュー版)"], PINK),
+    ("os-linux", "terminal", "Linux", ["IBus / fcitx5 の", "入力ソース (プレビュー版)"], OUTLINE),
+    ("community-discord", "chat", "Discord", ["使い方の相談・雑談・", "開発の話はこちらで！"], BLUE),
+    ("support-sponsors", "heart", "GitHub Sponsors", ["開発を続けるための", "応援をお待ちしています！"], PINK),
 ]
 
 

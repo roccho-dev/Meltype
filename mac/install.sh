@@ -18,7 +18,10 @@ done
 # 入力ソースの「+」の一覧に Meltype が出ない Mac がある (macOS 26、#21)。
 # アプリ内の登録処理で、有効な入力ソースを追加し、Meltype の重複だけを整理する。
 enable_input_source() {
-    "$TARGET/Meltype.app/Contents/MacOS/Meltype" --register-input-source
+    "$TARGET/Meltype.app/Contents/MacOS/Meltype" --register-input-source || {
+        echo "入力ソースに Meltype を追加できませんでした。ログアウトしてログインし直すと直ります。" >&2
+        return 0
+    }
     killall TextInputMenuAgent 2>/dev/null || true
     echo "入力ソースに Meltype を追加しました"
 }
@@ -44,6 +47,11 @@ enable_input_source
 register_input_source
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET/Meltype.app"
 bash ./start-input-method.sh "$TARGET/Meltype.app"
-swift ./select-input-source.swift
-echo
-echo "Meltype を起動し、入力ソースとして選択しました。"
+# swift はコマンドライン・デベロッパ・ツールが無い Mac では使えない。選べなくてもインストールは終わっている。
+if swift ./select-input-source.swift; then
+    echo
+    echo "Meltype を起動し、入力ソースとして選択しました。"
+else
+    echo
+    echo "Meltype を起動しました。入力メニューから Meltype を選んでください。"
+fi
