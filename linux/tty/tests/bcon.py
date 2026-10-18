@@ -171,6 +171,16 @@ finished("editor-restart")
 
 # Typed candidate transport: original IDs/types are checked by the separately
 # required actual NativeAOT test; this local provider is explicitly a fixture.
+reference_source = {"repository":"roccho-dev/adrs", "revision":"f" * 40,
+    "path":"decisions/synthetic-reference.jsonl", "blob":"e" * 40,
+    "sha256":"d" * 64, "rawId":"synthetic-reference", "status":"proposed"}
+reference_text = ("https://github.com/roccho-dev/adrs/blob/" + reference_source["revision"]
+    + "/" + reference_source["path"] + "#L1")
+reference_row = {"id":"reference-input:synthetic-display", "representation":reference_text,
+    "meaning":{"kind":"text", "text":reference_text, "source":reference_source, "authority":"reference-only"},
+    "evidence":{"theme":"intent-fit", "noul":0.9}}
+# Public synthetic display data, not a real ADR locator or source read receipt.
+put("reference-proposal.json", json.dumps(reference_row))
 provider = put("provider.py", """from http.server import BaseHTTPRequestHandler,HTTPServer
 import json
 class Handler(BaseHTTPRequestHandler):
@@ -178,6 +188,8 @@ class Handler(BaseHTTPRequestHandler):
   q=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
   with open('/run/meltype-proof/provider-requests','a') as log: log.write(json.dumps(q)+'\\n')
   rows=[{'id':id,'representation':text,'meaning':{'kind':'text'},'evidence':['local-test']} for id,text in [('a','甲候補'),('b','乙候補')]]
+  if self.path == '/reference':
+   with open('/run/meltype-proof/reference-proposal.json') as source: rows=[json.load(source)]
   payload=json.dumps({**q,'proposals':rows}).encode()
   self.send_response(200);self.end_headers();self.wfile.write(payload)
  def log_message(self,*args):pass
@@ -197,6 +209,45 @@ machine.fail("test -e /run/meltype-proof/typed-text")
 machine.send_key("ret")
 finished("typed")
 assert contents("typed-text") == "乙候補"
+
+# A realistic citation-length typed reference goes through the same bcon
+# candidate painter. The separately required Apps/Native test proves acquisition;
+# this fixture observes the panel and exact selection/child effect, not live use
+# or a promise that every URL/meaning JSON glyph is simultaneously readable.
+reference_binding = '"\\C-]": printf %s "$READLINE_LINE" > /run/meltype-proof/reference-buffer'
+reader = put("read-reference", "bind -x " + shlex.quote(reference_binding)
+    + "\ntouch /run/meltype-proof/reference-ready\n"
+    "IFS= read -er -p 'REFERENCE> ' value\nprintf %s \"$value\" > /run/meltype-proof/reference-text\nexit 0\n")
+launch("reference", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/reference "
+    "meltype-tty --raw-text --compose --selection-fd 3 -- bash --noprofile --rcfile "
+    + reader + " -i 3>>/run/meltype-proof/reference-selection")
+machine.wait_until_succeeds("test -e /run/meltype-proof/reference-ready")
+before = scanout("B-reference-before")
+reference_queries_before = len(contents("provider-requests").splitlines())
+machine.send_chars("u")
+reference_panel = candidates("B-reference-candidate", before)
+machine.fail("test -s /run/meltype-proof/reference-selection")
+machine.fail("test -e /run/meltype-proof/reference-text")
+machine.send_key("ret")
+machine.wait_until_succeeds("test -s /run/meltype-proof/reference-selection")
+machine.fail("test -e /run/meltype-proof/reference-text")
+deadline = time.monotonic() + 15
+while panels(scanout("B-reference-committed")) > panels(before) + 1000:
+    assert time.monotonic() < deadline, "reference panel did not clear after selection"
+    time.sleep(.2)
+machine.send_key("ctrl-0x1B")  # Observe the same child's unsubmitted Readline buffer.
+machine.wait_until_succeeds("test -e /run/meltype-proof/reference-buffer")
+assert contents("reference-buffer") == reference_text
+machine.fail("test -e /run/meltype-proof/reference-text")
+machine.send_key("ret")
+finished("reference")
+assert contents("reference-text") == reference_text
+reference_selection = [json.loads(line) for line in contents("reference-selection").splitlines()]
+assert len(reference_selection) == 1, reference_selection
+reference_queries = [json.loads(line) for line in contents("provider-requests").splitlines()[reference_queries_before:]]
+assert len(reference_queries) == 1 and reference_queries[0]["raw"] == "u", reference_queries
+assert reference_selection[0] == {**reference_queries[0], "proposal":reference_row}
+scanout("B-reference-after")
 # Canonical no-echo input is observed by the product, not declared safe by
 # the fixture. Even the known-raw-text test wrapper must bypass this input.
 requests_before = contents("provider-requests")
@@ -495,6 +546,8 @@ print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
     "diag_p19e":diagnosis,
     "paste_resize":paste_resize,
+    "reference_display":{"source":"SYNTHETIC_DISPLAY_FIXTURE", "selected":reference_selection,
+        "child_text":contents("reference-text"), "full_label_readability":"INDEPENDENT_IMAGE_REVIEW_REQUIRED"},
     "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
     "bcon":"ca30c939f5ae48fff10eb8dc26ea05b179bef680","ime":False,

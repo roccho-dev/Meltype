@@ -240,7 +240,7 @@ try:
         current.close()
         stop_host(hosts[1])
         print(json.dumps({"gate": "B-reference-source-session", "status": "PASS",
-            "apps": "cbaed345182c19bcc7f0a244e5cc633dce415632",
+            "apps": "9775a6f9b22437ddf5724fea7ec111b703b56a08",
             "provider": "CONTROLLED_LOOPBACK", "source": "SYNTHETIC_GIT_ONLY",
             "same_raw_generation": True, "old_effects": 0, "selected": 1,
             "source_revision_changed": True, "host_children_terminated": True,
