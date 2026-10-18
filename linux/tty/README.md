@@ -173,6 +173,9 @@ Clipboard preparation alone is not a passed paste. Resize checks use
 bcon's existing font-size binding, read the fixed child's own PTY dimensions,
 and check candidate redraw/selection and Japanese input after shrinking and
 restoring the grid. This does not claim dynamic DRM hotplug or physical hardware.
+After the child geometry changes, the same bounded scanout check also waits for
+an actual frame change; old panel pixels alone do not establish a new rendering.
+Saved before/smaller/restored images still need independent visual readback.
 
 At B commit `8c9f009b6e0f9c421f957b4e8bd9ab68bf3ff3dd`, Linux run `38350288872`
 passed the input-only suite including Shell input and nano editing. Later source

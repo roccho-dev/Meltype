@@ -51,11 +51,19 @@ def panels(image):
     assert colors is not None
     return sum(n for n, color in colors if all(abs(a-b) <= 2 for a,b in zip(color,(24,26,32))))
 
-def candidates(name, before):
+def candidates(name, before, changed_from=None):
     deadline = time.monotonic() + 15
     while True:
         shown = scanout(name)
-        if panels(shown) > panels(before) + 1000: return shown
+        changed = True
+        if changed_from is not None:
+            # Geometry changes before the next rendered scanout. An existing
+            # old panel must not satisfy the resize observation immediately.
+            # Count actual changed pixels, not a bounding-box area or RGB sum.
+            red, green, blue = ImageChops.difference(shown, changed_from).split()
+            mask = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+            changed = mask.point(lambda value: 255 if value else 0).histogram()[255] > 1000
+        if panels(shown) > panels(before) + 1000 and changed: return shown
         assert time.monotonic() < deadline, machine.succeed("cat /run/meltype-proof/*-errors")
         time.sleep(.2)
 
@@ -430,10 +438,10 @@ before = scanout("B-resize-shell-before")
 machine.send_chars("u")
 shown = candidates("B-resize-shell-candidates", before)
 shell_smaller = font_resize(shell_pid, shell_original)
-resized = candidates("B-resize-shell-smaller", before)
+resized = candidates("B-resize-shell-smaller", before, changed_from=shown)
 assert ImageChops.difference(shown, resized).getbbox()
 shell_restored = font_resize(shell_pid, shell_original, reset=True)
-restored = candidates("B-resize-shell-restored", before)
+restored = candidates("B-resize-shell-restored", before, changed_from=resized)
 machine.send_key("down")
 time.sleep(.2)
 assert ImageChops.difference(restored, scanout("B-resize-shell-selected")).getbbox()
@@ -464,10 +472,10 @@ before = scanout("B-resize-editor-before")
 machine.send_chars("nihongo ")
 shown = candidates("B-resize-editor-candidates", before)
 editor_smaller = font_resize(editor_pid, editor_original)
-resized = candidates("B-resize-editor-smaller", before)
+resized = candidates("B-resize-editor-smaller", before, changed_from=shown)
 assert ImageChops.difference(shown, resized).getbbox()
 editor_restored = font_resize(editor_pid, editor_original, reset=True)
-candidates("B-resize-editor-restored", before)
+candidates("B-resize-editor-restored", before, changed_from=resized)
 machine.send_key("ret")
 saved_editor(paste_editor + "日本語", "paste-editor-text")
 machine.send_key("ctrl-x")
