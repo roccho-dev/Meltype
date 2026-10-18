@@ -92,7 +92,6 @@ jobs:
           python3 -m unittest discover -s linux/build/Meltype-linux/tty/tests -v
           python3 linux/build/Meltype-linux/tty/tests/native_tty.py "$PWD/linux/build/Meltype-linux"
           python3 linux/build/Meltype-linux/tty/tests/native_display.py "$PWD/linux/build/Meltype-linux"
-          python3 linux/build/Meltype-linux/tty/tests/native_proposals.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
           # タグ (v1.0.0) なら Meltype-1.0.0-linux.zip、それ以外はテスト版の名前

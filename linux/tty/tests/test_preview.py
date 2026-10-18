@@ -265,6 +265,26 @@ class Observation(unittest.TestCase):
     def test_off_by_default(self):
         self.assertIsNone(inspect.signature(m.run).parameters['preview_fd'].default)
 
+    def test_stdio_pipe_and_readonly_are_rejected(self):
+        for fd in [0,1,2,-1]:
+            with self.subTest(fd=fd),self.assertRaises(ValueError): m.validate_observation_fd(fd)
+        r,w=os.pipe()
+        try:
+            with self.assertRaises(ValueError): m.validate_observation_fd(w)
+        finally: os.close(r);os.close(w)
+        with tempfile.TemporaryFile() as file:
+            with self.assertRaises(ValueError): m.validate_observation_fd(file.fileno())
+            readonly=os.open('/dev/null',os.O_RDONLY)
+            try:
+                with self.assertRaises(ValueError): m.validate_observation_fd(readonly)
+            finally: os.close(readonly)
+
+    def test_invalid_observer_never_starts_child(self):
+        from unittest.mock import Mock
+        with patch.object(m.os,'isatty',return_value=True),patch.object(m.pty,'fork') as fork:
+            with self.assertRaises(ValueError): m.run(['/bin/true'],Mock(),preview_fd=1)
+            fork.assert_not_called()
+
 class Persistence(unittest.TestCase):
     """While the child only echoes the typed keys, the preview stays and is replaced in place."""
     ANSWERS={'nihong':[{'id':'a','representation':'にほんg','meaning':{},'evidence':[]}],
