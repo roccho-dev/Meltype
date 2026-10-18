@@ -165,6 +165,12 @@ physical keys and actual screenshots. The guest has Bash Readline and nano but
 no Chromium or cdp-tty. Tests check mixed input, candidate selection, native
 Editor deletion/Undo/Redo, multiple lines, local typed candidates, hidden input,
 and same-phase termios restoration. Learning/config paths are isolated per trial.
+The B2 paste checks prepare bcon's existing shared clipboard, then press its real
+Ctrl+Shift+V binding and compare the child Readline / nano bytes (including LF
+and Tab). Clipboard preparation alone is not a passed paste. Resize checks use
+bcon's existing font-size binding, read the fixed child's own PTY dimensions,
+and check candidate redraw/selection and Japanese input after shrinking and
+restoring the grid. This does not claim dynamic DRM hotplug or physical hardware.
 
 At B commit `8c9f009b6e0f9c421f957b4e8bd9ab68bf3ff3dd`, Linux run `38350288872`
 passed the input-only suite including Shell input and nano editing. Later source
