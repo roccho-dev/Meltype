@@ -111,6 +111,11 @@ jobs:
         with:
           extra_nix_config: |
             system-features = nixos-test kvm big-parallel
+      - name: Same-package Native source-reference handoff through installed Apps
+        run: |
+          set -euo pipefail
+          tools="$(nix-build linux/tty/tests/reference_tools.nix --no-out-link --extra-experimental-features 'nix-command flakes')"
+          python3 linux/build/Meltype-linux/tty/tests/native_reference.py "$PWD/linux/build/Meltype-linux" "$tools"
       - name: Actual bcon NixOS VT, candidate scanout, child input and terminal recovery
         run: |
           set -o pipefail
