@@ -252,22 +252,6 @@ class NativeProof(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.check_no_learning(self.broken_sources()['commits'])
 
-    def test_record_what_the_core_gives_for_a_trailing_nn(self):
-        # #19 P19e: the Core's answer for "nihon" / "nihonn" / "nihonngo", as the preview and Ctrl+Space
-        # get it. Recorded here (the Core is the same in 1.2.1.6 and 1.2.1.7); the bcon VM judges.
-        found = {}
-        for word in ['nihon', 'nihonn', 'nihonngo']:
-            self.tearDown(); self.setUp()
-            preview = [p['representation'] for p in m.core_proposals(self.native)(self.query(word))]
-            self.bridge = m.InputBridge(self.native, direct=True)
-            self.assertEqual(self.send(word.encode()), word.encode())
-            self.bridge.observe(word.encode())  # the echo a line editor would print
-            self.assertEqual(self.send(b'\x00'), b'\x7f' * len(word))
-            view = dict(self.bridge.view or {})
-            found[word] = {'preview': preview, 'composition': view.get('text'), 'candidates': view.get('candidates'),
-                           'committed': self.send(b'\r').decode()}
-        print(json.dumps({'trailing_nn': found}, ensure_ascii=False), flush=True)
-
     def test_preview_offers_conversion_candidates_for_a_trailing_nn(self):
         # #19 P19f: the composition of nihonn is only にほん; the preview must carry the conversion (kanji).
         kanji = lambda text: any(chr(0x4e00) <= ch <= chr(0x9fff) for ch in text)

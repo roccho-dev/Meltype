@@ -13,7 +13,7 @@ The TTY does not reinterpret `expect` as permission to erase child-owned text.
 It uses main's `meltype_set_can_delete(..., 0)` before input, retaining atomic
 rejection of any unsupported deletion that nevertheless reaches the boundary.
 A matching NativeAOT artifact is required; an older library without that API
-is not substituted. The original Proposal port and lifetime/cancel rules remain.
+is not substituted. The lifetime/cancel rules remain.
 
 The ordinary Linux artifact keeps main's IBus/fcitx5 products and all their
 existing tests. B's Nix output selects only NativeAOT, Mozc, TTY and notices
@@ -97,7 +97,7 @@ mode, turns previews off (the reason is kept) rather than stopping input.
 Without `--preview` nothing differs from 1.2.1.5: in particular the candidate
 image never draws the Core's own key hint. `--preview-fd` explicitly records,
 in an append-only file, what was shown, where, and when it was hidden; it holds
-the previewed word and is off by default, like `--selection-fd`.
+the previewed word and is off by default.
 
 While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
 hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
@@ -107,10 +107,9 @@ child unchanged, so Readline, vim and nano keep their Ctrl commands.
 
 ## Capture and privacy
 
-Canonical input with ECHO disabled bypasses conversion and Proposal lookup.
-When capture becomes unavailable, pending composition and unsent/received
-Proposal work are cancelled. A request already sent cannot be recalled, but its
-response is invalidated. Privacy tests use fabricated strings, not credentials.
+Canonical input with ECHO disabled bypasses conversion. When capture becomes
+unavailable, pending composition is cancelled. Privacy tests use fabricated
+strings, not credentials.
 
 Raw no-echo input cannot be identified as an Editor versus a password field from
 the PTY alone. It therefore bypasses capture by default. `--raw-text` explicitly
@@ -123,21 +122,6 @@ Entry flags: `--native`, `--mozc`, an existing CJK `--font`, and optionally
 `--preview` (with `--preview-fd`) for #19's suggestions. `--transport-proof` is explicitly nonvisual and
 for testing, not normal use. Font files are not copied into this repository.
 
-## Optional shared Proposal port
-
-`MELTYPE_PROPOSAL_URL` explicitly enables local HTTP. With it unset, no provider
-request is sent. The wire is request `{generation, raw}` and response
-`{generation, raw, proposals}` preserving each original `id`, `representation`,
-`meaning`, and `evidence`. Only text meaning is inserted; action candidates are
-not terminal commands. The native port retains selection identity, not an effect
-or adoption receipt. Original ordering, generation/cancel/one-shot checks belong
-to the existing Core, not a second ranker here.
-
-There is one active request, one replaceable pending request and one response.
-Callbacks enter native code on the input thread. No credentials, redirects or
-proxies forward captured text. Changed/unknown target epochs reject selection;
-a fixed PTY identity is not evidence of an invisible GUI caret.
-
 The input loop inspects already-readable bytes before expiring a lone Escape.
 A possible terminal-reply continuation stays in the bounded escape parser;
 ordinary text still follows the expired Escape, preserving cancellation. A late
@@ -147,23 +131,16 @@ before a Native effect. Capture-disabled input retains byte-exact bypass.
 The original sequence deadline and size limits still apply;
 there is no retry or guarantee for replies arriving after Escape was delivered.
 
-`ops/packages/semcmp` at `29be7a2d33c85f99ac693dd51d2ecd6ebbbaf8fe` is the shared
-calculation source. Its README distinguishes controlled composition from real
-provider quality and public consumer wiring. The local HTTP fixtures here do
-not prove that external integration. Keep its required real binding as an explicit
-acceptance item rather than duplicating candidate production in Meltype.
-
 ## Checks and evidence
 
 The Linux workflow runs exact-source regressions and same-build package checks:
-`test_*.py`, real Core/Mozc/PTY (`native_tty.py`), real CLI/native/PTY/PNG with
-controlled terminal replies (`native_display.py`), and real NativeAOT typed
-Proposal checks (`native_proposals.py`). Controlled replies are not bcon evidence.
+`test_*.py`, real Core/Mozc/PTY (`native_tty.py`), and real CLI/native/PTY/PNG with
+controlled terminal replies (`native_display.py`). Controlled replies are not bcon evidence.
 
 `bcon.nix`/`bcon.py` add a real unchanged bcon in a NixOS test VM with virtual
 physical keys and actual screenshots. The guest has Bash Readline and nano but
 no Chromium or cdp-tty. Tests check mixed input, candidate selection, native
-Editor deletion/Undo/Redo, multiple lines, local typed candidates, hidden input,
+Editor deletion/Undo/Redo, multiple lines, hidden input,
 and same-phase termios restoration. Learning/config paths are isolated per trial.
 
 At B commit `8c9f009b6e0f9c421f957b4e8bd9ab68bf3ff3dd`, Linux run `38350288872`
