@@ -20,7 +20,7 @@ REFERENCE = 'https://github.com/roccho-dev/adrs/blob/' + 'f' * 40 + '/decisions/
 
 
 class CandidateLayoutTests(unittest.TestCase):
-    def render(self, view, cols=80, rows=24, cursor=22):
+    def render(self, view, cols=80, rows=24, cursor=22, passive=False):
         display = KittyDisplay(FONT, rows, cols, 987654)
         display.cursor = (cursor, 5)
         original = copy.deepcopy(view)
@@ -36,7 +36,7 @@ class CandidateLayoutTests(unittest.TestCase):
                 self.draw.text(position, text, **options)
 
         with patch('PIL.ImageDraw.Draw', side_effect=Draw):
-            output = display.update(view)
+            output = display.update(view, passive=passive)
         frames = re.findall(rb'\x1b_G[^;]*;(.*?)\x1b\\', output)
         image = Image.open(io.BytesIO(base64.b64decode(b''.join(frames))))
         self.assertEqual(view, original, 'layout must not mutate the native view or Proposal')
@@ -89,6 +89,19 @@ class CandidateLayoutTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'covering the active cursor'):
             display.update(view)
         self.assertEqual(display.update(view, passive=True), b'')
+
+
+    def test_two_row_passive_reference_has_bounded_paint_without_mutating_the_offer(self):
+        lines = self.render({'text': 'sourcereference', 'candidates': [REFERENCE],
+            'selectedIndex': -1, 'hint': 'Ctrl+Space: convert'}, rows=5, cursor=3, passive=True)
+        self.assertEqual(len(lines), 2)
+        self.assertIn('…', lines[1])
+
+    def test_active_painter_with_no_space_refuses_instead_of_hiding(self):
+        display = KittyDisplay(FONT, 1, 80, 987654)
+        display.cursor = (1, 5)
+        with self.assertRaisesRegex(ValueError, 'covering the active cursor'):
+            display.paint({'text': 'u', 'candidates': [REFERENCE], 'selectedIndex': 0})
 
 
 if __name__ == '__main__':

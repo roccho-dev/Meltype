@@ -197,8 +197,8 @@ class KittyDisplay:
         return frozenset(serial for serial,_ in self.boundary.graphics_replies)
 
     def update(self,view,passive=False):
-        """passive: a preview (#19) that must never stop input. It is drawn only above the cursor line,
-        and a late cursor or an unusual terminal mode turns previews off instead of failing."""
+        """passive: preview above the cursor, or below when needed, never on it.
+        Too little room for a candidate, late cursor or unusual modes hide it without stopping input."""
         self.view=view
         # Cancelling a view does not cancel an already-issued cursor query.
         # Its reply still belongs here, and its wait must remain bounded.
@@ -262,11 +262,11 @@ class KittyDisplay:
         if 0<=selected<len(notes) and notes[selected]:
             details.append('evidence: '+plain(notes[selected]))
         row,col=self.cursor
-        space=row-1 if passive else max(row-1,self.rows-row)
+        space=max(row-1,self.rows-row)
         budget=min(space,8)
-        if budget<3:
-            if passive: return b''
+        if budget<3 and not passive:
             raise ValueError('candidate panel cannot fit without covering the active cursor line')
+        if passive and budget<2: return b''
         details=details[:max(0,budget-3)]
         count=min(5,max(1,budget-2-len(details)))
         page=max(0,selected)//count*count
@@ -280,13 +280,17 @@ class KittyDisplay:
             # clipping its common URL prefix. Navigation still belongs to Core;
             # this changes no Proposal or selection. Keep the bounded panel.
             if len(candidates)>1: prefix+=f'{active+1}/{len(candidates)} '
-            lines += wrapped(plain(candidates[active]),prefix,budget-2-len(details))
+            lines += wrapped(plain(candidates[active]),prefix,max(1,budget-2-len(details)))
         else:
             lines += [fit(('▶ ' if i==selected else '  ')+plain(candidates[i])) for i in range(page,min(page+count,len(candidates)))]
         # The Core's view always has its own (Windows) hint; only a preview draws one of its own.
         lines += [fit(line) for line in details]+[fit(plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel')]
-        # A preview stays off the cursor line and below, where the shell edits and lists completions.
-        if passive and row<=len(lines): return b''
+        if passive:
+            # Preserve main's top-of-screen preview: above when it fits, else
+            # below, else only the rows on the larger side of the cursor.
+            above,below=row-1,self.rows-row
+            up=above>=len(lines) or (below<len(lines) and above>=below)
+            lines=lines[:above if up else below]
         # Font ascent/descent differs from the terminal grid. Reserve the
         # actual glyph ink plus padding; a fixed 26px row clips Noto's hint.
         ink=[self.font.getbbox(line) for line in lines]
@@ -298,7 +302,8 @@ class KittyDisplay:
             draw.text((4,i*line_height+text_y),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
-        top=row-len(lines) if row>len(lines) else row+1
+        if passive: top=row-len(lines) if up else row+1
+        else: top=row-len(lines) if row>len(lines) else row+1
         left=left if left is not None else max(1,min(col,self.cols-columns+1))
         self.placed=(top,left,len(lines),columns)
         out=bytearray(f'\x1b[{top};{left}H'.encode())
