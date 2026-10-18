@@ -85,8 +85,10 @@ An answer later than 0.5 s, or for an older word, is dropped. The first source
 is the Core's own conversion in a second native session, always cancelled, so
 the typing session is untouched and nothing is committed or learned; Core calls
 are serialized, so only Ctrl+Space (which calls the Core) can wait for a query
-in flight. The image is drawn only above the cursor line, never on it or below
-where the shell edits and lists completions. While the child only echoes the
+in flight. The image is drawn above the cursor line; when the rows above are
+too few (a prompt near the top, as after a fresh login) it is drawn below it,
+and with too few rows on both sides only the lines that fit are drawn. It is
+never drawn on the cursor line itself. While the child only echoes the
 typed keys it stays, and new suggestions replace it in place under the same
 image id; until the new word's answer arrives the previous suggestions stay
 dimmed and labelled with their own word and "…", so they never pass for the

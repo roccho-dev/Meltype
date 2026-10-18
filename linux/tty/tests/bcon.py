@@ -311,10 +311,54 @@ machine.send_key("ret")
 machine.wait_until_succeeds("test \"$(grep -c r-marker /run/meltype-proof/preview-r)\" = 2")
 machine.send_chars("exit\n")
 finished("preview")
+
+# PV: after a fresh login the prompt is at the top of the screen. The preview is drawn below the cursor
+# line there (cursor rows 1-7 showed nothing before), and bash's line and its output stay intact.
+def top_events():
+    text = machine.succeed("cat /run/meltype-proof/top-log 2>/dev/null || true")
+    return [json.loads(line) for line in text.splitlines()]
+
+def top_shown():
+    return [e for e in top_events() if e["event"] in ("show", "update") and not e.get("stale") and e.get("input") == "nihongo"]
+
+launch("top", "meltype-tty --raw-text --preview --preview-fd 3 -- bash --noprofile --norc -i "
+    "3>>/run/meltype-proof/top-log")
+machine.wait_until_succeeds("pgrep -f '[b]ash --noprofile --norc -i'", timeout=30)
+time.sleep(2)
+machine.send_chars("printf '\\033[H\\033[2J'\n")    # The prompt on the first row, as after a fresh login.
+time.sleep(1)
+top_before = scanout("B-top-before")
+machine.send_chars("echo nihongo")
+deadline = time.monotonic() + 15
+while not top_shown():
+    assert time.monotonic() < deadline, (top_events(), machine.succeed("cat /run/meltype-proof/*-errors"))
+    time.sleep(.2)
+time.sleep(.5)                               # bcon's next frame carries the image
+top_event = top_shown()[-1]
+assert top_event["cursor"][0] == 1, top_event
+assert top_event["rect"][0] > top_event["cursor"][0], ("not below the cursor line", top_event)
+assert top_event["representations"][0] == "日本語", top_event
+panel, text = new_boxes(scanout("B-top-shown"), top_before)
+assert panel is not None and text is not None, (panel, text)
+assert text[3] <= panel[1], ("the preview covers the line bash echoed", panel, text)
+machine.send_key("ctrl-spc")                 # Converts to the preview's first candidate.
+time.sleep(1)
+machine.send_key("ret")                      # Commits it on the first row.
+machine.send_chars(" | tee /run/meltype-proof/top-conv\n")   # bash prints 日本語 on the rows the preview used.
+machine.wait_until_succeeds("test -s /run/meltype-proof/top-conv")
+time.sleep(1)
+assert contents("top-conv").strip() == "日本語", contents("top-conv")
+top_after = top_events()
+assert top_after[-1]["event"] == "hide", top_after
+panel, text = new_boxes(scanout("B-top-after"), top_before)
+assert panel is None and text is not None, ("preview pixels left over bash's output", panel, text)
+top_result = {"cursor": top_event["cursor"], "rect": top_event["rect"], "conversion": contents("top-conv").strip()}
+machine.send_chars("exit\n")
+finished("top")
 machine.fail("pgrep -f '[f]citx5|[i]bus-daemon|[t]tyskk|[c]dp-tty|[c]hromium'")
 print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
-    "trailing_nn":trailing,
+    "trailing_nn":trailing,"top":top_result,
     "shell":"hello 日本語","editor":"日本語\nhello\n",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,
     "hidden_input_bypassed":True,

@@ -200,9 +200,10 @@ class Placement(unittest.TestCase):
         rows=int(re.search(rb',r=([0-9]+),',out)[1])
         self.assertLessEqual(top+rows,20)
 
-    def test_no_room_above_means_nothing_drawn(self):
+    def test_no_room_above_means_drawn_below(self):
         d=self.display();d.cursor=(2,5)
-        self.assertNotIn(b'a=T',d.update(self.VIEW,passive=True))
+        out=d.update(self.VIEW,passive=True)
+        self.assertEqual(int(re.match(rb'\x1b\[([0-9]+);[0-9]+H',out)[1]),3)
 
     def test_removed_before_any_child_output(self):
         d=self.display();d.cursor=(20,5)
@@ -238,6 +239,66 @@ class Placement(unittest.TestCase):
     def test_origin_mode_skips_the_preview(self):
         d=self.display();d.output(b'\x1b[?6h')
         self.assertEqual(d.update(self.VIEW,passive=True),b'')
+
+class TopOfScreen(unittest.TestCase):
+    """A prompt near the top (as after a fresh login) still gets its preview: below the cursor line when the
+    rows above are too few, shrunk when neither side has room. VersaPro (P): with the cursor reported on rows
+    1-7 nothing was shown; on rows 8, 12, 20 and 40 the suggestions were."""
+    VIEW={'text':'nihongo','candidates':['日本語','ニホンゴ','にほんご','二本語','2本語'],'selectedIndex':-1,'hint':'Ctrl+Space: convert'}
+
+    def reported(self,row,rows=24,col=5):
+        """The preview asks for the cursor, the terminal reports `row`, the preview is drawn."""
+        d=KittyDisplay(FONT,rows,80,4242)
+        self.assertEqual(d.update(self.VIEW,passive=True),b'\x1b[6n')
+        self.assertTrue(d.reply(f'\x1b[{row};{col}R'.encode()))
+        return d,d.update(self.VIEW,passive=True)
+
+    def rect(self,out):
+        match=re.match(rb'\x1b\[([0-9]+);[0-9]+H',out)
+        self.assertIsNotNone(match,out)
+        return int(match[1]),int(re.search(rb',r=([0-9]+),',out)[1])
+
+    def below(self,row):
+        d,out=self.reported(row)
+        self.assertIn(b'a=T',out)
+        self.assertEqual(self.rect(out),(row+1,7))                     # below the cursor line, all of it
+        self.assertTrue(out.endswith(f'\x1b[{row};5H'.encode()))      # the cursor is put back
+
+    def test_shown_when_the_cursor_is_on_row_1(self): self.below(1)
+
+    def test_shown_when_the_cursor_is_on_row_7(self): self.below(7)
+
+    def test_the_log_says_shown(self):
+        d,out=self.reported(1,col=13)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'preview.jsonl'
+            fd=os.open(path,os.O_CREAT|os.O_WRONLY|os.O_APPEND,0o600)
+            try: m.PreviewLog(fd).note(d,None,'update')
+            finally: os.close(fd)
+            events=[json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual([e['event'] for e in events],['show'])
+        self.assertEqual(events[0]['cursor'],[1,13])
+        self.assertEqual(events[0]['rect'][0],2)
+
+    def test_shrunk_to_the_rows_that_fit(self):
+        d,out=self.reported(3,rows=5)
+        self.assertIn(b'a=T',out)
+        self.assertEqual(self.rect(out),(1,2))                         # the two rows above, never the cursor line
+
+    def test_below_an_echo_keeps_it_and_it_is_replaced_in_place(self):
+        d,out=self.reported(1)
+        self.assertEqual(d.output(b'o',1),b'o')                        # the echo on the cursor line, no delete
+        again=d.update(dict(self.VIEW,text='nihongoo'),passive=True)
+        self.assertIn(b'a=T',again)
+        self.assertNotIn(b'a=d',again)                                 # same id, nothing removed
+        self.assertEqual(self.rect(again),self.rect(out))
+
+    def test_below_it_is_removed_before_enter_and_any_other_output(self):
+        for output in [b'\r\n',b'\r\nnihongo-a  nihongo-b\r\n',b'\x1b[2J']:
+            with self.subTest(output=output):
+                d,out=self.reported(1)
+                self.assertIn(b'a=T',out)
+                self.assertEqual(d.output(output),b'\x1b_Ga=d,d=I,i=4242,q=2\x1b\\'+output)
 
 class Observation(unittest.TestCase):
     """--preview-fd: an explicit append-only file of what was shown and hidden; nothing by default."""
