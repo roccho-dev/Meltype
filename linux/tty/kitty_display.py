@@ -196,7 +196,7 @@ class KittyDisplay:
             text=''.join(c if ord(c)>=32 and not 0x7f<=ord(c)<=0x9f else ' ' for c in str(value))
             return text[:240]+('…' if len(text)>240 else '')
         columns=min(self.cols,60)
-        width=columns*10; line_height=26
+        width=columns*10
         available=width-8
         def fit(text):
             if self.font.getlength(text)<=available: return text
@@ -247,10 +247,15 @@ class KittyDisplay:
         lines += [fit(line) for line in details]+[fit(plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel')]
         # A preview stays off the cursor line and below, where the shell edits and lists completions.
         if passive and row<=len(lines): return b''
+        # Font ascent/descent differs from the terminal grid. Reserve the
+        # actual glyph ink plus padding; a fixed 26px row clips Noto's hint.
+        ink=[self.font.getbbox(line) for line in lines]
+        text_y=2-min(0,min(box[1] for box in ink))
+        line_height=max(26,text_y+max(box[3] for box in ink)+2)
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
         draw=ImageDraw.Draw(image)
         for i,line in enumerate(lines):
-            draw.text((4,i*line_height+2),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
+            draw.text((4,i*line_height+text_y),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
         top=row-len(lines) if row>len(lines) else row+1

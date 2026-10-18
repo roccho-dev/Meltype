@@ -48,8 +48,9 @@ class CandidateLayoutTests(unittest.TestCase):
         self.assertLessEqual(top + rows - 1, display.rows)
         self.assertLessEqual(left + columns - 1, cols)
         for (x, y), text in drawn:
-            left_ink, _, right, bottom = display.font.getbbox(text)
+            left_ink, top_ink, right, bottom = display.font.getbbox(text)
             self.assertGreaterEqual(x + left_ink, 0, text)
+            self.assertGreaterEqual(y + top_ink, 0, text)
             self.assertLessEqual(x + right, image.width, text)
             self.assertLessEqual(y + bottom, image.height, text)
         return [text for _, text in drawn]
