@@ -242,6 +242,15 @@ sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False
             b.feed(tail)
         self.assertEqual(n.calls,[])
 
+    def test_capture_disabled_keeps_late_controls_and_paste_byte_exact(self):
+        for tail in [b'[A', b'[31m', b'[200~private\x1b[201~']:
+            with self.subTest(tail=tail):
+                n=Native(); b=m.InputBridge(n); b.set_capture(False)
+                with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+                effect=b.expire(10.061,continuation=tail)+b.feed(tail)
+                self.assertEqual(effect,b'\x1b'+tail)
+                self.assertEqual(n.calls,[])
+
     def test_arrow_without_composition_is_byte_exact(self):
         n=Native();b=m.InputBridge(n)
         self.assertEqual(b.feed(b'\x1b[A'),b'\x1b[A')

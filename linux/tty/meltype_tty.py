@@ -436,11 +436,11 @@ class InputBridge:
         if re.fullmatch(rb"\x1b\[(?:\??[0-9;]*[Rcnt]|\?[0-9;]+u)", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")):
             if self.on_report is not None and self.on_report(raw): return b""
             return raw
+        if not self.capturing: return raw
         if late_reply:
             # Readiness does not prove whether this was a reply or a user's
             # Escape followed by a control prefix. Never guess a Native effect.
             raise UnsafeEffect("ambiguous late terminal escape sequence")
-        if not self.capturing: return raw
         if self.paused: return self._defer(raw)
         # Kitty CSI-u and modifyOtherKeys use the same virtual-key boundary.
         # Original protocol bytes survive whenever Meltype did not consume a key.
@@ -523,8 +523,9 @@ class InputBridge:
                     sequence = bytes(self.escape)
                     self.escape.clear()
                     if sequence == PASTE_BEGIN:
-                        if self.late_reply:
+                        if self.late_reply and self.capturing:
                             raise UnsafeEffect("ambiguous late terminal escape sequence")
+                        self.late_reply = False
                         self.paste.extend(sequence)
                         self.pasting = True
                     else:
