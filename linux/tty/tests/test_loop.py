@@ -201,6 +201,26 @@ sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False
         self.assertEqual(b.expire(10.061,continuation=report)+b.feed(report),b'\x1b'+report)
         self.assertEqual(n.calls,[(27,0,0)])
 
+    def test_escape_then_a_fresh_report_keeps_both_introducers_before_deadline(self):
+        for report in [b'\x1b_Gi=7;OK\x1b\\', b'\x1b[12;34R', b'\x1b]52;c;YWJj\x07']:
+            for split in range(len(report) + 1):
+                with self.subTest(report=report, split=split):
+                    n=Native(); b=m.InputBridge(n)
+                    with patch.object(m.time,'monotonic',return_value=10):
+                        effect=b.feed(b'\x1b'+report[:split])+b.feed(report[split:])
+                    self.assertEqual(effect,b'\x1b'+report)
+                    self.assertEqual(n.calls,[(27,0,0)],'report tail entered Native')
+
+    def test_two_real_escape_keys_keep_the_second_keys_own_deadline(self):
+        n=Native(); b=m.InputBridge(n)
+        with patch.object(m.time,'monotonic',return_value=10):
+            self.assertEqual(b.feed(b'\x1b'),b'')
+        with patch.object(m.time,'monotonic',return_value=10.04):
+            self.assertEqual(b.feed(b'\x1b'),b'\x1b')
+        self.assertEqual(b.expire(10.07),b'')
+        self.assertEqual(b.expire(10.101),b'\x1b')
+        self.assertEqual(n.calls,[(27,0,0),(27,0,0)])
+
     def test_ready_text_then_report_keeps_the_same_order(self):
         n=Native(); b=m.InputBridge(n); tail=b'z\x1b_Gi=7;OK\x1b\\'
         with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')

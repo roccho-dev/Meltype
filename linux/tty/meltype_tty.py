@@ -504,6 +504,14 @@ class InputBridge:
                     self.pasting = False
                 continue
             if self.escape:
+                if self.escape == b"\x1b" and byte == 27:
+                    # A second introducer starts its own sequence. The first
+                    # bare Escape is a key; combining both as opaque bytes
+                    # would expose the second report's tail as typed input.
+                    out.extend(self.flush_escape())
+                    self.escape.append(byte)
+                    self.escape_started = time.monotonic()
+                    continue
                 self.escape.append(byte)
                 string_sequence = self.escape[:2] in (b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")
                 if len(self.escape) > (1024 * 1024 if string_sequence else 64):

@@ -1,7 +1,7 @@
 # Existing Apps composition consumed only by B's controlled integration test.
 # No credentials, source records, floating refs or new product service.
 let
-  apps = builtins.getFlake "github:roccho-dev/apps/9775a6f9b22437ddf5724fea7ec111b703b56a08";
+  apps = builtins.getFlake "github:roccho-dev/apps/8e0fe4403779b13a4699d3cbf1ed12c10dbfb3c0";
   system = "x86_64-linux";
   pkgs = import apps.inputs.nixpkgs { inherit system; };
 in pkgs.runCommand "meltype-reference-input-test-tools" { } ''
