@@ -251,6 +251,19 @@ sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False
                 self.assertEqual(effect,b'\x1b'+tail)
                 self.assertEqual(n.calls,[])
 
+    def test_capture_loss_during_late_prefix_does_not_poison_later_input(self):
+        n=Native(); b=m.InputBridge(n)
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        b.expire(10.061,continuation=b'[')
+        self.assertEqual(b.feed(b'['),b'')
+        b.set_capture(False)
+        self.assertEqual(b.feed(b'A'),b'\x1b[A')
+        self.assertEqual(n.calls,[])
+        self.assertFalse(b.late_reply)
+        b.set_capture(True)
+        self.assertEqual(b.feed(b'\x1b[Bz'),b'\x1b[Bz')
+        self.assertEqual(n.calls,[(ord('Z'),ord('z'),0)])
+
     def test_arrow_without_composition_is_byte_exact(self):
         n=Native();b=m.InputBridge(n)
         self.assertEqual(b.feed(b'\x1b[A'),b'\x1b[A')
