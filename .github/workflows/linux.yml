@@ -100,6 +100,7 @@ jobs:
           (cd linux/build && zip -qr "$name" Meltype-linux)
           ls -la linux/build
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        id: runtime
         with:
           name: meltype-linux
           path: linux/build/Meltype-*.zip
@@ -126,10 +127,23 @@ jobs:
             ${{ runner.temp }}/meltype-bcon/*.png
           if-no-files-found: warn
           retention-days: 14
+      - name: Publish this producer's source and tested distribution identities
+        env:
+          MELTYPE_ARTIFACT_ID: ${{ steps.runtime.outputs.artifact-id }}
+          MELTYPE_ARTIFACT_DIGEST: ${{ steps.runtime.outputs.artifact-digest }}
+        run: python3 linux/tty/supply.py
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: meltype-linux-supply-${{ github.sha }}
+          path: linux/build/meltype-supply.json
+          if-no-files-found: error
+          retention-days: 14
       # この fork の GitHub Actions でビルドしたことの証明 (gh attestation verify <zip> --repo roccho-dev/Meltype で確かめられる)
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: linux/build/Meltype-*.zip
+          subject-path: |
+            linux/build/Meltype-*.zip
+            linux/build/meltype-supply.json
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
         with:
