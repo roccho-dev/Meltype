@@ -200,9 +200,10 @@ class Placement(unittest.TestCase):
         rows=int(re.search(rb',r=([0-9]+),',out)[1])
         self.assertLessEqual(top+rows,20)
 
-    def test_no_room_above_means_nothing_drawn(self):
+    def test_no_room_above_means_drawn_below(self):
         d=self.display();d.cursor=(2,5)
-        self.assertNotIn(b'a=T',d.update(self.VIEW,passive=True))
+        out=d.update(self.VIEW,passive=True)
+        self.assertEqual(int(re.match(rb'\x1b\[([0-9]+);[0-9]+H',out)[1]),3)
 
     def test_removed_before_any_child_output(self):
         d=self.display();d.cursor=(20,5)

@@ -157,8 +157,9 @@ class KittyDisplay:
         return False
 
     def update(self,view,passive=False):
-        """passive: a preview (#19) that must never stop input. It is drawn only above the cursor line,
-        and a late cursor or an unusual terminal mode turns previews off instead of failing."""
+        """passive: a preview (#19) that must never stop input. It is drawn above the cursor line, or below
+        it when the rows above are too few, never on it; a late cursor or an unusual terminal mode turns
+        previews off instead of failing."""
         self.view=view
         # Cancelling a view does not cancel an already-issued cursor query.
         # Its reply still belongs here, and its wait must remain bounded.
@@ -214,8 +215,12 @@ class KittyDisplay:
         # The Core's view always has its own (Windows) hint; only a preview draws one of its own.
         lines += details+[plain(view['hint']) if passive and view.get('hint') else '↑↓ / Space   Enter: commit   Esc: cancel']
         row,col=self.cursor
-        # A preview stays off the cursor line and below, where the shell edits and lists completions.
-        if passive and row<=len(lines): return b''
+        if passive:
+            # A preview stays off the cursor line: above it where there is room, else below it (a prompt near
+            # the top, as after a fresh login), else on the larger side with only the lines that fit.
+            above,below=row-1,self.rows-row
+            up=above>=len(lines) or (below<len(lines) and above>=below)
+            lines=lines[:above if up else below]
         columns=min(self.cols,60)
         width=columns*10; line_height=26
         image=Image.new('RGB',(width,len(lines)*line_height),(24,26,32))
@@ -224,7 +229,8 @@ class KittyDisplay:
             draw.text((4,i*line_height+2),line,font=self.font,fill=(120,124,132) if stale else (240,242,246))
         stream=io.BytesIO();image.save(stream,format='PNG')
         payload=base64.b64encode(stream.getvalue())
-        top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
+        if passive: top=row-len(lines) if up else row+1
+        else: top=row-len(lines) if row>len(lines) else min(row+1,self.rows-len(lines)+1)
         left=left if left is not None else max(1,min(col,self.cols-columns+1))
         self.placed=(top,left,len(lines),columns)
         out=bytearray(f'\x1b[{top};{left}H'.encode())
