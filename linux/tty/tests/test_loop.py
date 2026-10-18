@@ -176,6 +176,72 @@ sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False
         self.assertEqual(n.calls,[(0x28,0,0)])
         self.assertEqual(b.view['selectedIndex'],1)
 
+    def test_ready_report_continuations_preserve_pending_composition(self):
+        for reply in [b'\x1b_Gi=7;OK\x1b\\', b'\x1b[12;34R', b'\x1b]52;c;YWJj\x07']:
+            for elapsed in [.059, .061]:
+                with self.subTest(reply=reply, elapsed=elapsed):
+                    n=Native(); b=m.InputBridge(n); b.view={'text':'pending'}
+                    with patch.object(m.time,'monotonic',return_value=10): b.feed(reply[:1])
+                    effect=b.expire(10+elapsed,continuation=reply[1:])
+                    effect+=b.feed(reply[1:])
+                    self.assertEqual(effect,reply)
+                    self.assertEqual(n.calls,[])
+                    self.assertEqual(b.view,{'text':'pending'})
+
+    def test_ready_text_still_expires_the_real_escape_before_text(self):
+        n=Native(); b=m.InputBridge(n)
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        self.assertEqual(b.expire(10.061,continuation=b'z')+b.feed(b'z'),b'\x1bz')
+        self.assertEqual(n.calls,[(27,0,0),(ord('Z'),ord('z'),0)])
+
+    def test_real_escape_before_a_separate_report_is_not_swallowed(self):
+        n=Native(); b=m.InputBridge(n)
+        report=b'\x1b_Gi=7;OK\x1b\\'
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        self.assertEqual(b.expire(10.061,continuation=report)+b.feed(report),b'\x1b'+report)
+        self.assertEqual(n.calls,[(27,0,0)])
+
+    def test_ready_text_then_report_keeps_the_same_order(self):
+        n=Native(); b=m.InputBridge(n); tail=b'z\x1b_Gi=7;OK\x1b\\'
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        self.assertEqual(b.expire(10.061,continuation=tail)+b.feed(tail),b'\x1b'+tail)
+        self.assertEqual(n.calls,[(27,0,0),(ord('Z'),ord('z'),0)])
+
+    def test_ambiguous_late_controls_fail_before_any_native_effect(self):
+        for tail in [b'[A', b'[31m', b'[200~payload\x1b[201~']:
+            with self.subTest(tail=tail):
+                n=Native(); b=m.InputBridge(n); b.view={'text':'pending'}
+                with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+                self.assertEqual(b.expire(10.061,continuation=tail),b'')
+                with self.assertRaisesRegex(m.UnsafeEffect,'ambiguous late'):
+                    b.feed(tail)
+                self.assertEqual(n.calls,[])
+                self.assertEqual(b.view,{'text':'pending'})
+
+    def test_late_prefix_does_not_extend_original_sequence_deadline(self):
+        for prefix in [b'[', b'_']:
+            n=Native(); b=m.InputBridge(n)
+            with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+            self.assertEqual(b.expire(10.061,continuation=prefix),b'')
+            self.assertEqual(b.feed(prefix),b'')
+            with self.assertRaisesRegex(m.UnsafeEffect,'incomplete terminal'):
+                b.expire(11.501,continuation=b'anything')
+            self.assertEqual(n.calls,[])
+        n=Native(); b=m.InputBridge(n)
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        with self.assertRaisesRegex(m.UnsafeEffect,'incomplete terminal'):
+            b.expire(11.501,continuation=b'_Gi=7;OK\x1b\\')
+        self.assertEqual(n.calls,[])
+
+    def test_late_report_keeps_existing_size_bound(self):
+        n=Native(); b=m.InputBridge(n)
+        with patch.object(m.time,'monotonic',return_value=10): b.feed(b'\x1b')
+        tail=b'_'+b'x'*(1024*1024)
+        b.expire(10.061,continuation=tail)
+        with self.assertRaisesRegex(m.UnsafeEffect,'unbounded terminal'):
+            b.feed(tail)
+        self.assertEqual(n.calls,[])
+
     def test_arrow_without_composition_is_byte_exact(self):
         n=Native();b=m.InputBridge(n)
         self.assertEqual(b.feed(b'\x1b[A'),b'\x1b[A')
