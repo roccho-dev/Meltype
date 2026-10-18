@@ -275,6 +275,7 @@ class InputBridge:
         self.paste = bytearray()
         self.pasting = False
         self.escape_started = None
+        self.late_reply = False
         self.paused = False
         self.deferred = bytearray()
         self.on_report = None
@@ -426,6 +427,7 @@ class InputBridge:
         return raw
 
     def _sequence(self, raw):
+        late_reply, self.late_reply = self.late_reply, False
         if raw in (b"\x1b[I", b"\x1b[O"):
             self.set_focus(raw == b"\x1b[I")
             return raw  # Focus changes never commit or replay prior preedit.
@@ -435,6 +437,10 @@ class InputBridge:
             if self.on_report is not None and self.on_report(raw): return b""
             return raw
         if not self.capturing: return raw
+        if late_reply:
+            # Readiness does not prove whether this was a reply or a user's
+            # Escape followed by a control prefix. Never guess a Native effect.
+            raise UnsafeEffect("ambiguous late terminal escape sequence")
         if self.paused: return self._defer(raw)
         # Kitty CSI-u and modifyOtherKeys use the same virtual-key boundary.
         # Original protocol bytes survive whenever Meltype did not consume a key.
@@ -517,6 +523,9 @@ class InputBridge:
                     sequence = bytes(self.escape)
                     self.escape.clear()
                     if sequence == PASTE_BEGIN:
+                        if self.late_reply and self.capturing:
+                            raise UnsafeEffect("ambiguous late terminal escape sequence")
+                        self.late_reply = False
                         self.paste.extend(sequence)
                         self.pasting = True
                     else:
@@ -529,10 +538,17 @@ class InputBridge:
                 out.extend(self._step(byte))
         return bytes(out) + self.drain()
 
-    def expire(self, now=None):
+    def expire(self, now=None, continuation=b""):
         now = time.monotonic() if now is None else now
         limit = .06 if self.escape == b"\x1b" else 1.5
         if self.escape and self.escape_started is not None and now - self.escape_started >= limit:
+            if self.escape == b"\x1b" and continuation[:1] in (b"[", b"]", b"P", b"_", b"^", b"X"):
+                # Only bytes already read by this loop can complete the prefix.
+                # Keep the original clock and the existing 1.5s sequence bound.
+                if now - self.escape_started >= 1.5:
+                    raise UnsafeEffect("incomplete terminal escape sequence")
+                self.late_reply = True
+                return self.drain()
             return self.flush_escape() + self.drain()
         return self.drain()
 
@@ -541,6 +557,7 @@ class InputBridge:
             return b""
         pending = bytes(self.escape)
         self.escape.clear()
+        self.late_reply = False
         if pending != b"\x1b":
             raise UnsafeEffect("incomplete terminal escape sequence")
         return self._step(27)
@@ -864,8 +881,11 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             readers = [0] if display is not None and display.pending else [0, master]
             ready, _, _ = select.select(readers, [], [], .02)
             bridge.set_capture(capture_allowed(master, raw_text))
-            # The escape deadline is independent of child-output activity.
-            effect = bridge.expire()
+            # Inspect the already-ready continuation before turning a reply's
+            # leading ESC into a Native cancel. Ordinary keys still expire the
+            # old ESC first; feeding every key first would change Escape+text.
+            input_data = os.read(0, 4096) if 0 in ready else None
+            effect = bridge.expire(continuation=input_data or b"")
             if effect:
                 write_all(master, effect)
             refresh()
@@ -888,11 +908,10 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                     write_all(1, display.output(data, moved))
                     preview_log.note(display, previewer, "child output")
                 refresh()
-            if 0 in ready:
-                data = os.read(0, 4096)
-                if not data:
+            if input_data is not None:
+                if not input_data:
                     break
-                accept(data)
+                accept(input_data)
     finally:
         # Restoration and reap are not skipped even if another cleanup fails.
         if writer is not None:

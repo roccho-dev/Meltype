@@ -138,6 +138,15 @@ Callbacks enter native code on the input thread. No credentials, redirects or
 proxies forward captured text. Changed/unknown target epochs reject selection;
 a fixed PTY identity is not evidence of an invisible GUI caret.
 
+The input loop inspects already-readable bytes before expiring a lone Escape.
+A possible terminal-reply continuation stays in the bounded escape parser;
+ordinary text still follows the expired Escape, preserving cancellation. A late
+control prefix cannot prove user intent. During capture, if it completes as a
+key, paste or unknown control rather than a terminal report, the session stops
+before a Native effect. Capture-disabled input retains byte-exact bypass.
+The original sequence deadline and size limits still apply;
+there is no retry or guarantee for replies arriving after Escape was delivered.
+
 `ops/packages/semcmp` at `29be7a2d33c85f99ac693dd51d2ecd6ebbbaf8fe` is the shared
 calculation source. Its README distinguishes controlled composition from real
 provider quality and public consumer wiring. The local HTTP fixtures here do

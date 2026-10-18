@@ -101,6 +101,59 @@ class NativeProof(unittest.TestCase):
         self.assertEqual(self.bridge.view['text'], '日本語')
         self.assertEqual(self.send(b'\r'), '日本語'.encode())
 
+    def test_ready_split_reply_preserves_real_preedit_past_escape_deadline(self):
+        self.assertEqual(self.send(b'u'), b'')
+        self.assertEqual(self.bridge.view['text'], 'う')
+        keys, commits = [], []
+        original_key, original_commit = self.native.key, self.native.commit
+        def key(*args):
+            keys.append(args)
+            return original_key(*args)
+        def commit():
+            result=original_commit(); commits.append(result); return result
+        self.native.key, self.native.commit = key, commit
+        incoming, input_slave = os.openpty()
+        tty.setraw(input_slave)
+        reply=b'\x1b_Gi=424242;OK\x1b\\'
+        try:
+            os.write(incoming,reply[:1])
+            self.assertEqual(self.bridge.feed(os.read(input_slave,1)),b'')
+            os.write(incoming,reply[1:])
+            self.assertTrue(select.select([input_slave],[],[],1)[0])
+            tail=os.read(input_slave,4096)
+            effect=self.bridge.expire(self.bridge.escape_started+.061,continuation=tail)
+            effect+=self.bridge.feed(tail)
+            self.assertEqual(effect,reply)
+            m.write_all(self.master,effect)
+            self.assertTrue(select.select([self.slave],[],[],1)[0])
+            self.assertEqual(os.read(self.slave,4096),reply)
+            self.assertEqual(keys,[])
+            self.assertEqual(commits,[])
+            self.assertEqual(self.bridge.view['text'],'う')
+            print(json.dumps({'ready_split_reply':{'clock_ms':61,'ready':True,
+                'native_keys':len(keys),'native_commits':len(commits),
+                'child_hex':effect.hex(),'preedit':self.bridge.view['text']}},ensure_ascii=False),flush=True)
+        finally:
+            os.close(incoming); os.close(input_slave)
+
+    def test_real_escape_then_ready_text_cancels_without_committing_old_preedit(self):
+        self.assertEqual(self.send(b'u'),b'')
+        self.assertEqual(self.bridge.view['text'],'う')
+        self.assertEqual(self.send(b'\x1b'),b'')
+        incoming, input_slave=os.openpty()
+        tty.setraw(input_slave)
+        try:
+            os.write(incoming,b'z')
+            self.assertTrue(select.select([input_slave],[],[],1)[0])
+            tail=os.read(input_slave,4096)
+            effect=self.bridge.expire(self.bridge.escape_started+.061,continuation=tail)
+            effect+=self.bridge.feed(tail)
+            self.assertEqual(effect,b'')
+            self.assertEqual(select.select([self.slave],[],[],0)[0],[])
+            self.assertEqual(self.bridge.view['text'],'z')
+        finally:
+            os.close(incoming); os.close(input_slave)
+
     def test_ctrl_uipo_switch_real_composition_without_writing(self):
         # Windows Meltype's Ctrl+P/O/I/U: full-width, half-width, katakana, hiragana.
         self.send(b'aiueo')
