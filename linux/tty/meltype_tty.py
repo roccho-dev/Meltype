@@ -265,6 +265,14 @@ class InputBridge:
     def __init__(self, native, direct=False):
         self.native = native
         self.direct = direct
+        self.image_replies = lambda: frozenset()
+        self.reply_tokens = None
+        self.reply_started = None
+        self.held = deque()
+        self.held_bytes = 0
+        self.held_binding = None
+        self.replaying = False
+        self.input_epoch = 0
         self.shadow = bytearray()    # printable ASCII just typed in Direct Input, as the child has it
         self.unechoed = bytearray()  # the part of it whose echo has not come back from the child yet
         self.erasing = 0             # BackSpaces whose echo has not come back yet
@@ -297,6 +305,7 @@ class InputBridge:
     def _refresh_capture(self):
         allowed = self.capture_permitted and self.focused
         if allowed == self.capturing: return
+        self.invalidate_input()
         self.capturing = allowed
         self.forget()
         focus = getattr(self.native, "focus", None)
@@ -311,6 +320,80 @@ class InputBridge:
             self.deferred.clear()
             self.consumed_keys.clear()
 
+    def _binding(self):
+        return (self.input_epoch, repr(self.view), self.source, self.capturing,
+                self.focused, getattr(self.native, 'target', None))
+
+    def invalidate_input(self):
+        # A queued key may not select a different view/PTY after an external
+        # event. Do this before applying capture, focus, resize or view changes.
+        if self.held:
+            raise UnsafeEffect('held input binding changed before image acknowledgement')
+        self.input_epoch += 1
+
+    def discard_input(self):
+        self.held.clear()
+        self.held_bytes=0
+        self.held_binding=None
+        self.reply_tokens=None
+        self.reply_started=None
+        self.escape.clear()
+        self.paste.clear()
+        self.deferred.clear()
+
+    def _reply_wait(self, now=None):
+        if self.reply_started is None: return
+        now=time.monotonic() if now is None else now
+        if now-self.reply_started>=1.5:
+            raise UnsafeEffect('incomplete image reply at its original sequence deadline')
+        if self.reply_tokens is not None and not self.reply_tokens.intersection(self.image_replies()):
+            self.reply_tokens=None
+            if not self.held: self.reply_started=None
+
+    def _start_reply_wait(self):
+        if self.reply_tokens is not None: return
+        tokens=self.image_replies()
+        if tokens:
+            self.reply_tokens=frozenset(tokens)
+            if not self.held:
+                self.reply_started=time.monotonic()
+                self.held_binding=self._binding()
+
+    def _hold(self, kind, raw):
+        if self.replaying: return False
+        self._reply_wait()
+        if self.reply_tokens is None and not self.held: return False
+        if self.held_binding != self._binding():
+            raise UnsafeEffect('held input binding changed before image acknowledgement')
+        if self.held_bytes+len(raw)>1024*1024 or len(self.held)>=4096:
+            raise UnsafeEffect('input exceeded the bounded image-reply buffer')
+        self.held.append((kind,raw))
+        self.held_bytes+=len(raw)
+        return True
+
+    def held_ready(self):
+        self._reply_wait()
+        return bool(self.held and self.reply_tokens is None and not self.paused)
+
+    def release_input(self):
+        # One semantic event, followed by run()'s normal display refresh. In
+        # particular, a timed-out bare ESC must not be reparsed as Alt+text.
+        if not self.held_ready(): return b''
+        if self.held_binding != self._binding():
+            raise UnsafeEffect('held input binding changed before image acknowledgement')
+        kind,raw=self.held.popleft()
+        self.held_bytes-=len(raw)
+        self.replaying=True
+        try:
+            if kind=='key': effect=self._key(raw[0],raw)
+            elif kind=='sequence': effect=self._sequence(raw)
+            else: effect=self._passthrough(raw)
+        finally:
+            self.replaying=False
+        self.held_binding=self._binding() if self.held else None
+        if not self.held and self.reply_tokens is None: self.reply_started=None
+        return effect+self.drain()
+
     def _defer(self, raw):
         if len(self.deferred)+len(raw)>1024*1024:
             raise UnsafeEffect("input exceeded the bounded cursor-wait buffer")
@@ -318,6 +401,7 @@ class InputBridge:
         return b""
 
     def _key(self, code, original, shifted=False):
+        if self._hold('key',original): return b''
         if not self.capturing: return original
         if self.paused: return self._defer(original)
         # Only while composing; otherwise the Ctrl byte keeps its meaning for the child.
@@ -375,6 +459,7 @@ class InputBridge:
     def observe(self, data):
         """Child output. Only the echo of the remembered keys keeps them; anything else forgets them.
         Returns how many columns that echo moved the cursor, or None when the output was anything else."""
+        if data and (self.reply_tokens is not None or self.held): self.invalidate_input()
         index = moved = 0
         while index < len(data) and (self.unechoed or self.erasing):
             if self.unechoed and data[index] == self.unechoed[0]:
@@ -416,6 +501,7 @@ class InputBridge:
         return effect
 
     def _passthrough(self, raw):
+        if self._hold('raw',raw): return b''
         if not self.capturing: return raw
         if self.paused: return self._defer(raw)
         if self.view is not None:
@@ -429,6 +515,7 @@ class InputBridge:
     def _sequence(self, raw):
         late_reply, self.late_reply = self.late_reply, False
         if raw in (b"\x1b[I", b"\x1b[O"):
+            if self.reply_tokens is not None or self.held: self.invalidate_input()
             self.set_focus(raw == b"\x1b[I")
             return raw  # Focus changes never commit or replay prior preedit.
         # Cursor/device/graphics replies are not user commands. Never commit
@@ -436,6 +523,7 @@ class InputBridge:
         if re.fullmatch(rb"\x1b\[(?:\??[0-9;]*[Rcnt]|\?[0-9;]+u)", raw) or raw.startswith((b"\x1b]", b"\x1bP", b"\x1b_", b"\x1b^", b"\x1bX")):
             if self.on_report is not None and self.on_report(raw): return b""
             return raw
+        if self._hold('sequence',raw): return b''
         if not self.capturing: return raw
         if late_reply:
             # Readiness does not prove whether this was a reply or a user's
@@ -494,6 +582,7 @@ class InputBridge:
     def feed(self, data):
         out = bytearray()
         for byte in data:
+            self._reply_wait()
             if self.pasting:
                 self.paste.append(byte)
                 if len(self.paste) > 1024 * 1024:
@@ -509,6 +598,7 @@ class InputBridge:
                     # bare Escape is a key; combining both as opaque bytes
                     # would expose the second report's tail as typed input.
                     out.extend(self.flush_escape())
+                    self._start_reply_wait()
                     self.escape.append(byte)
                     self.escape_started = time.monotonic()
                     continue
@@ -540,14 +630,22 @@ class InputBridge:
                         out.extend(self._sequence(sequence))
                 continue
             if byte == 27:
+                self._start_reply_wait()
                 self.escape.append(byte)
                 self.escape_started = time.monotonic()
             else:
                 out.extend(self._step(byte))
+        self._reply_wait()
         return bytes(out) + self.drain()
 
     def expire(self, now=None, continuation=b""):
         now = time.monotonic() if now is None else now
+        self._reply_wait(now)
+        if self.escape == b"\x1b" and self.reply_tokens is not None:
+            if (now-self.escape_started>=.06 and continuation
+                    and continuation[:1] not in (b"[",b"]",b"P",b"_",b"^",b"X")):
+                return self.flush_escape()+self.drain()  # held, never a Native action yet
+            return self.drain()
         limit = .06 if self.escape == b"\x1b" else 1.5
         if self.escape and self.escape_started is not None and now - self.escape_started >= limit:
             if self.escape == b"\x1b" and continuation[:1] in (b"[", b"]", b"P", b"_", b"^", b"X"):
@@ -796,6 +894,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             os._exit(127)
     os.close(reader)
     native = None
+    bridge = None
     old_handlers = {}
     display = None
     status = None
@@ -814,6 +913,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
         if make_display is not None:
             display = make_display()
             bridge.on_report = display.reply
+            bridge.image_replies = getattr(display,'image_replies',lambda:frozenset())
         previewer = Preview(core_proposals(native)) if preview and display is not None and direct else None
         preview_log = PreviewLog(preview_fd if previewer is not None else None)
 
@@ -822,6 +922,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             result = poll() if poll is not None else None
             if result is not None:
                 if effect_bytes(result): raise UnsafeEffect("provider response attempted an unselected effect")
+                bridge.invalidate_input()
                 bridge.view = result.get("view")
             if display is None: return
             if bridge.view is None and previewer is not None:
@@ -835,8 +936,8 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
         def accept(data):
             bridge.set_capture(capture_allowed(master, raw_text))
             pending = deque(data)
-            while pending:
-                effect = bridge.feed(bytes([pending.popleft()]))
+            while pending or bridge.held_ready():
+                effect = bridge.release_input() if bridge.held_ready() else bridge.feed(bytes([pending.popleft()]))
                 if effect:
                     write_all(master, effect)
                     publish_selection(native, selection_fd)
@@ -846,6 +947,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                     bridge.deferred.clear()
 
         def resize(*_):
+            bridge.invalidate_input()
             bridge.forget()  # The child may redraw its line.
             _size_to_child(master)
             if display is not None:
@@ -897,6 +999,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
             if effect:
                 write_all(master, effect)
             refresh()
+            if bridge.held_ready(): accept(b'')
             if master in ready:
                 try:
                     data = os.read(master, 65536)
@@ -922,6 +1025,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
                 accept(input_data)
     finally:
         # Restoration and reap are not skipped even if another cleanup fails.
+        if bridge is not None: bridge.discard_input()
         if writer is not None:
             os.close(writer)
         try:

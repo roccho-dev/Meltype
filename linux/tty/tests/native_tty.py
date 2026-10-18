@@ -20,6 +20,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import meltype_tty as m
+from kitty_display import Boundary
 
 PACKAGE = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else None
 if PACKAGE is None:
@@ -153,6 +154,43 @@ class NativeProof(unittest.TestCase):
             self.assertEqual(self.bridge.view['text'],'z')
         finally:
             os.close(incoming); os.close(input_slave)
+
+    def owned_image(self):
+        boundary=Boundary()
+        boundary.feed(b'\x1b_Ga=T,i=424242,q=0,m=0;AAAA\x1b\\')
+        self.bridge.image_replies=lambda:frozenset(t for t,_ in boundary.graphics_replies)
+        def report(raw):
+            boundary.reply(raw)
+            return False  # The complete original ACK still belongs to the child.
+        self.bridge.on_report=report
+        return boundary
+
+    def test_owned_split_ack_survives_empty_cycles_without_native_input(self):
+        self.send(b'u'); self.owned_image()
+        self.assertEqual(self.bridge.view['text'],'う')
+        calls=[]; original=self.native.key
+        def key(*args): calls.append(args);return original(*args)
+        self.native.key=key
+        self.send(b'\x1b')
+        time.sleep(.09)
+        self.assertEqual(self.bridge.expire(),b'')
+        self.assertEqual(self.send(b'_Gi=424242;OK\x1b\\'),b'\x1b_Gi=424242;OK\x1b\\')
+        self.assertEqual(calls,[])
+        self.assertEqual(self.bridge.view['text'],'う')
+        self.assertEqual(self.send(b'\r'),'う'.encode())
+
+    def test_owned_ack_releases_real_escape_before_text_without_old_commit(self):
+        self.send(b'u'); self.owned_image()
+        self.send(b'\x1b')
+        time.sleep(.09)
+        self.assertEqual(self.bridge.expire(continuation=b'z'),b'')
+        self.assertEqual(self.send(b'z'),b'')
+        self.assertEqual(self.bridge.view['text'],'う')
+        self.assertEqual(self.send(b'\x1b_Gi=424242;OK\x1b\\'),b'\x1b_Gi=424242;OK\x1b\\')
+        while self.bridge.held_ready():
+            self.assertEqual(self.bridge.release_input(),b'')
+            self.assertEqual(select.select([self.slave],[],[],0)[0],[])
+        self.assertEqual(self.bridge.view['text'],'z')
 
     def test_ctrl_uipo_switch_real_composition_without_writing(self):
         # Windows Meltype's Ctrl+P/O/I/U: full-width, half-width, katakana, hiragana.

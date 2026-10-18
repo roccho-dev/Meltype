@@ -171,8 +171,20 @@ ordinary text still follows the expired Escape, preserving cancellation. A late
 control prefix cannot prove user intent. During capture, if it completes as a
 key, paste or unknown control rather than a terminal report, the session stops
 before a Native effect. Capture-disabled input retains byte-exact bypass.
-The original sequence deadline and size limits still apply;
-there is no retry or guarantee for replies arriving after Escape was delivered.
+An unanswered explicit-ID child image now owns its possible reply prefix even
+through empty input cycles. Complete matching ACKs still go byte-for-byte to
+that child. If a bare Esc and subsequent keys must be distinguished while the
+ACK is pending, they wait as ordered key events within the original 1.5-second
+sequence deadline (1 MiB / 4096 events). No Native action is inferred from a
+partial reply, an unknown ID, or a duplicate. Target, view, focus, capture,
+resize or child-output changes invalidate held actions before their effect.
+The bound is absolute: more input or a newer image cannot restart it. An
+incomplete or ambiguous operation stops without retry or key replay.
+Outstanding duplicate image IDs are rejected before output. This ownership
+proof covers A's unique per-frame IDs with the fixed bcon transport; it does
+not identify an arbitrary child's reused-ID ACK generation. DSR ownership
+retains its existing serialized query path. Keyboard protocol/modes and the
+unprotected 60 ms Esc boundary are unchanged.
 
 `ops/packages/semcmp` at `29be7a2d33c85f99ac693dd51d2ecd6ebbbaf8fe` is the shared
 calculation source. Its README distinguishes controlled composition from real

@@ -6,6 +6,7 @@ window manager or Fcitx5. Cursor coordinates come from a serialized DSR query.
 Never insert an image command inside a child UTF-8/control/image sequence.
 """
 import base64
+import copy
 import io
 import re
 import secrets
@@ -23,6 +24,8 @@ class Boundary:
         self.string_kind=0
         self.was_escape=False
         self.graphics_more=False
+        self.graphics_replies=[]
+        self.graphics_serial=0
         self.queries=0
         self.origin=False
 
@@ -66,6 +69,21 @@ class Boundary:
                 if ended:
                     if self.string_kind==95 and self.header.startswith(b'G'):
                         params=bytes(self.header).split(b';',1)[0]
+                        # The child's explicit image transaction owns its ACK.
+                        # A continuation chunk must not add a second obligation
+                        # or erase older image IDs during a repaint/resize.
+                        fields=dict(field.split(b'=',1) for field in params[1:].split(b',') if b'=' in field)
+                        if b'a' in fields or not self.graphics_more:
+                            image=fields.get(b'i',b'')
+                            if (fields.get(b'a',b't') in (b't',b'T',b'q')
+                                    and fields.get(b'q',b'0')==b'0' and image.isdigit()):
+                                image=int(image)
+                                if any(owned==image for _,owned in self.graphics_replies):
+                                    raise ValueError('ambiguous outstanding child image ID')
+                                self.graphics_serial+=1
+                                self.graphics_replies.append((self.graphics_serial,image))
+                                if len(self.graphics_replies)>64:
+                                    raise ValueError('too many unanswered child image queries')
                         self.graphics_more=bool(re.search(rb'(?:^G|,)m=1(?:,|$)',params))
                     self.state='text';self.was_escape=False
                 else:
@@ -75,6 +93,15 @@ class Boundary:
                         self.header.append(b)
                     self.was_escape=(b==27)
         if self.queries>64: raise ValueError('too many unanswered child cursor queries')
+
+    def reply(self,raw):
+        match=re.fullmatch(rb'\x1b_Gi=([0-9]+)(?:,p=[0-9]+)?;[^\x1b]*\x1b\\',raw)
+        if not match: return False
+        image=int(match[1])
+        owned=next((item for item in self.graphics_replies if item[1]==image),None)
+        if owned is None: return False
+        self.graphics_replies.remove(owned)
+        return True
 
 class KittyDisplay:
     """One owned image; byte-preserving child output and scoped deletion."""
@@ -125,14 +152,20 @@ class KittyDisplay:
     def output(self,data,moved=None):
         """moved: columns a pure echo of the typed keys moved the cursor (#19), else None. A preview stays
         through such an echo while the cursor stays on its line; anything else removes it first."""
+        # Validate the whole write before changing image/query ownership. A
+        # rejected output must not clear an image that is still on screen.
+        boundary=copy.copy(self.boundary)
+        boundary.header=bytearray(self.boundary.header)
+        boundary.graphics_replies=list(self.boundary.graphics_replies)
+        boundary.feed(data)
         if moved is not None and self.visible and self.visible_passive and self.cursor is not None:
             row,col=self.cursor
             if 1<=col+moved<=self.cols:
-                self.boundary.feed(data)
+                self.boundary=boundary
                 self.cursor=(row,col+moved)
                 return data
         before=self.clear()
-        self.boundary.feed(data)
+        self.boundary=boundary
         self.cursor=None
         return before+data
 
@@ -140,6 +173,7 @@ class KittyDisplay:
         self.rows=rows;self.cols=cols;self.cursor=None;self.last=None
 
     def reply(self,raw):
+        self.boundary.reply(raw)  # Forward the child's exact ACK below, never steal it.
         match=re.fullmatch(rb'\x1b\[(\??)([0-9]+);([0-9]+)R',raw)
         if not match: return False
         if self.pending and not match[1]:
@@ -155,6 +189,12 @@ class KittyDisplay:
             return True
         if self.boundary.queries: self.boundary.queries-=1
         return False
+
+    def image_replies(self):
+        # Explicit child image ACKs only. DSR ownership remains serialized by
+        # reply()/run(). A's per-frame IDs are unique; a reused ID cannot prove
+        # the generation of an unsolicited duplicate ACK from an arbitrary child.
+        return frozenset(serial for serial,_ in self.boundary.graphics_replies)
 
     def update(self,view,passive=False):
         """passive: a preview (#19) that must never stop input. It is drawn only above the cursor line,

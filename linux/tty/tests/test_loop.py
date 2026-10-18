@@ -176,6 +176,72 @@ sys.exit(m.run([sys.executable,'-c',{child!r}],Native,raw_text=True,direct=False
         self.assertEqual(n.calls,[(0x28,0,0)])
         self.assertEqual(b.view['selectedIndex'],1)
 
+    def image_reply_pty(self, keys=False):
+        # The real loop sees empty select cycles before the ACK tail. Its
+        # original 60 ms boundary must not turn an owned reply into a key.
+        import select
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td); received=path/'received'; calls=path/'calls'
+            reply=b'\x1b_Gi=424242;OK\x1b\\'
+            image=b'\x1b_Ga=T,i=424242,q=0,m=0;AAAA\x1b\\'
+            expected=reply+(b'\x1bz' if keys else b'')
+            child=f'''import os,select,time,tty
+from pathlib import Path
+tty.setraw(0); os.write(1,{image!r})
+data=bytearray(); deadline=time.monotonic()+4
+while len(data)<{len(expected)} and time.monotonic()<deadline:
+ if select.select([0],[],[],.02)[0]: data.extend(os.read(0,4096))
+Path({str(received)!r}).write_bytes(data)
+'''
+            code=f'''import json,sys
+from pathlib import Path
+import meltype_tty as m
+from kitty_display import Boundary
+class Display:
+ def __init__(self): self.boundary=Boundary();self.pending=False;self.cursor=(10,4)
+ def initialize(self,write): return b''
+ def update(self,view): return b''
+ def clear(self): return b''
+ def output(self,data): self.boundary.feed(data);return data
+ def reply(self,data): getattr(self.boundary,'reply',lambda _:False)(data);return False
+ def image_replies(self): return frozenset(t for t,_ in self.boundary.graphics_replies)
+class Native:
+ def __init__(self): self.calls=[]
+ def key(self,*args):
+  self.calls.append(args);return {{'consumed':False,'commits':[],'view':None}}
+ def close(self): Path({str(calls)!r}).write_text(json.dumps(self.calls))
+sys.exit(m.run([sys.executable,'-c',{child!r}],Native,Display,raw_text=True,direct=False))
+'''
+            master,slave=os.openpty();original=termios.tcgetattr(slave)
+            proc=subprocess.Popen([sys.executable,'-c',code],stdin=slave,stdout=slave,stderr=slave,
+                env={**os.environ,'PYTHONPATH':str(ROOT)})
+            try:
+                output=bytearray();deadline=time.monotonic()+3
+                while image not in output and proc.poll() is None and time.monotonic()<deadline:
+                    if select.select([master],[],[],.02)[0]: output.extend(os.read(master,4096))
+                self.assertIn(image,output,'child image was not forwarded')
+                os.write(master,b'\x1b')
+                time.sleep(.09)  # Actual empty cycles; no changed production clock/timeout.
+                if keys:
+                    os.write(master,b'z')
+                    time.sleep(.03)
+                    os.write(master,reply)
+                else:
+                    os.write(master,reply[1:])
+                self.assertEqual(proc.wait(6),0)
+                self.assertEqual(received.read_bytes(),expected)
+                self.assertEqual(json.loads(calls.read_text()),[[27,0,0],[90,122,0]] if keys else [])
+                self.assertEqual(termios.tcgetattr(slave),original)
+            finally:
+                if proc.poll() is None: proc.terminate();proc.wait(2)
+                os.close(master);os.close(slave)
+
+    def test_owned_image_ack_survives_empty_select_cycles(self):
+        self.image_reply_pty()
+
+    def test_pending_image_keeps_escape_then_text_as_separate_keys(self):
+        self.image_reply_pty(keys=True)
+
     def test_ready_report_continuations_preserve_pending_composition(self):
         for reply in [b'\x1b_Gi=7;OK\x1b\\', b'\x1b[12;34R', b'\x1b]52;c;YWJj\x07']:
             for elapsed in [.059, .061]:
