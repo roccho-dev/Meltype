@@ -166,8 +166,10 @@ no Chromium or cdp-tty. Tests check mixed input, candidate selection, native
 Editor deletion/Undo/Redo, multiple lines, local typed candidates, hidden input,
 and same-phase termios restoration. Learning/config paths are isolated per trial.
 The B2 paste checks prepare bcon's existing shared clipboard, then press its real
-Ctrl+Shift+V binding and compare the child Readline / nano bytes (including LF
-and Tab). Clipboard preparation alone is not a passed paste. Resize checks use
+Ctrl+Shift+V binding and compare the interactive Bash editing buffer / nano
+bytes (including LF and Tab). Bash's existing bind-x observer reads its full
+unsubmitted buffer; read-e itself ends at LF and is not a multiline oracle.
+Clipboard preparation alone is not a passed paste. Resize checks use
 bcon's existing font-size binding, read the fixed child's own PTY dimensions,
 and check candidate redraw/selection and Japanese input after shrinking and
 restoring the grid. This does not claim dynamic DRM hotplug or physical hardware.

@@ -396,19 +396,25 @@ def font_resize(pid, original, reset=False):
 
 
 paste_text = "貼付け 日本語\nsecond\tline"
-reader = put("read-paste", "touch /run/meltype-proof/paste-ready\n"
-    "IFS= read -er -p 'PASTE> ' value\nprintf %s \"$value\" > /run/meltype-proof/paste-text\n")
-launch("paste", "meltype-tty --raw-text -- bash --noprofile --norc " + reader)
+# `read -e` still stops at its first LF, even when Readline returned a complete
+# bracketed-paste buffer (Bash builtins/read.def). Observe the actual interactive
+# Shell's editing buffer before submitting anything instead of misusing read.
+binding = '"\\C-]": printf %s "$READLINE_LINE" > /run/meltype-proof/paste-text'
+reader = put("paste-bashrc", "bind 'set enable-bracketed-paste on'\n"
+    + "bind -x " + shlex.quote(binding) + "\nPS1='PASTE> '\n"
+    "touch /run/meltype-proof/paste-ready\n")
+launch("paste", "meltype-tty --raw-text -- bash --noprofile --rcfile " + reader + " -i")
 machine.wait_until_succeeds("test -e /run/meltype-proof/paste-ready")
 scanout("B-paste-shell-before")
 clipboard(paste_text)
 scanout("B-paste-shell-inserted")
 machine.fail("test -e /run/meltype-proof/paste-text")
-machine.send_key("ret")
-finished("paste")
-# This exact multiline result, not the earlier file-absence check alone, rejects
-# early LF submission: one read would otherwise have saved only the first line.
+machine.send_key("ctrl-0x1B")  # Ctrl+] runs the existing Bash bind -x observer.
+machine.wait_until_succeeds("test -e /run/meltype-proof/paste-text")
 assert contents("paste-text") == paste_text, contents("paste-text")
+machine.send_key("ctrl-c")      # Discard the unsubmitted buffer, never execute it.
+machine.send_chars("exit 0\n")
+finished("paste")
 
 reader = put("read-resize", "printf %s \"$$\" > /run/meltype-proof/resize-pid\n"
     "tty > /run/meltype-proof/resize-tty\ntouch /run/meltype-proof/resize-ready\n"
