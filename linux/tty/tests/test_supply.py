@@ -4,6 +4,7 @@
 These tests do not replace the CI's real Nix measurements or artifact readback.
 """
 import importlib.util
+import json
 import os
 from pathlib import Path
 import stat
@@ -58,6 +59,20 @@ class SupplyTests(unittest.TestCase):
                 "sha256-" + "A" * 42 + "B="):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError): supply.sri(bad)
+
+    def test_fetch_tree_identity_requires_explicit_record_not_store_path_coercion(self):
+        good = "sha256-" + "A" * 43 + "="
+        value = {"rev": "a" * 40, "narHash": good}
+        self.assertEqual(supply.source_identity(json.dumps(value), "a" * 40), good)
+        for invalid in ("/nix/store/source", None, [], {}, {**value, "outPath": "/nix/store/source"}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                supply.source_identity(json.dumps(invalid), "a" * 40)
+
+    def test_fetch_tree_other_revision_and_invalid_nar_are_rejected(self):
+        for value in ({"rev": "b" * 40, "narHash": "sha256-" + "A" * 43 + "="},
+                {"rev": "a" * 40, "narHash": "not-a-NAR"}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                supply.source_identity(json.dumps(value), "a" * 40)
 
     def archive(self, directory, extra=None):
         target = Path(directory) / "own.zip"

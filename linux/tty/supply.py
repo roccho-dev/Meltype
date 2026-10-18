@@ -65,6 +65,14 @@ def file_hash(path):
     return digest.hexdigest()
 
 
+def source_identity(raw, rev):
+    value = json.loads(raw)
+    require(type(value) is dict and set(value) == {"rev", "narHash"},
+        "fetched source identity is not a record")
+    require(value["rev"] == rev, "fetched source revision mismatch")
+    return sri(value["narHash"])
+
+
 def checked_archive(archive):
     """Validate this producer's one package before using the regular unzip path."""
     seen = set()
@@ -142,11 +150,11 @@ def main():
         products = {name: file_hash(unpacked / name) for name in REQUIRED}
     # Fetch the public immutable source exactly as a normal fetchTree consumer
     # would. Do not hash a checkout containing .git, build output or audit files.
-    expression = ('builtins.fetchTree { type = "github"; owner = "roccho-dev"; '
-        'repo = "Meltype"; rev = "' + rev + '"; }')
-    source = json.loads(command(nix + ["eval", "--json", "--expr", expression], root))
-    require(source.get("rev") == rev, "fetched source revision mismatch")
-    source_nar = sri(source.get("narHash"))
+    # A fetchTree result has outPath, so Nix's JSON conversion treats the whole
+    # result as a store-path string. Explicitly project the two identity fields.
+    expression = ('let source = builtins.fetchTree { type = "github"; owner = "roccho-dev"; '
+        'repo = "Meltype"; rev = "' + rev + '"; }; in { inherit (source) rev narHash; }')
+    source_nar = source_identity(command(nix + ["eval", "--json", "--expr", expression], root), rev)
     result = {"schema": "meltype-linux-supply/1", "repository": REPOSITORY,
         "source": {"rev": rev, "tree": tree, "narHash": source_nar},
         "producer": {"workflow": ".github/workflows/linux.yml",
