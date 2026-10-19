@@ -1,0 +1,47 @@
+# upstream (yksr-melt/Meltype) のファイルのうち、この fork が変えた・消したもの。.github/workflows/fork-surface.yml が確かめる。
+# ここに無い upstream のファイルは変えない・消さない。足したファイルは書かない。
+# 一覧は減らす方向にだけ変える (消したファイルを戻す・workflow を disable する、などの PR で)。
+.github/ISSUE_TEMPLATE/config.yml
+.github/PULL_REQUEST_TEMPLATE.md
+.github/bot/cla.mjs
+.github/bot/meltype-bot.mjs
+.github/bot/notices.mjs
+.github/bot/sponsors.mjs
+.github/workflows/bot.yml
+.github/workflows/build.yml
+.github/workflows/cla.yml
+.github/workflows/dotnet-update.yml
+.github/workflows/linux.yml
+.github/workflows/notices.yml
+.github/workflows/pr-checks.yml
+.github/workflows/sponsors.yml
+.github/workflows/winget.yml
+Build-Package.ps1
+CONTRIBUTING.md
+README.md
+SECURITY.md
+docs/RELEASE.md
+docs/images/headings/contributing/03.svg
+docs/images/headings/contributing/05.svg
+docs/images/headings/contributing/s06.svg
+docs/images/headings/release/04.svg
+linux/build.sh
+linux/ibus-engine-meltype
+linux/meltype.xml
+packaging/Find-InnoSetup.ps1
+packaging/Meltype.iss
+packaging/README.txt
+packaging/install.ps1
+packaging/setup-ime.ps1
+packaging/update.ps1
+src/Meltype.Core/Composition/CompositionController.cs
+src/Meltype.Core/Composition/MeltypeSession.cs
+src/Meltype.Core/Config/ProjectInfo.cs
+src/Meltype/AppInfo.cs
+src/Meltype/Meltype.csproj
+src/Meltype/UI/TrayApplicationContext.cs
+src/Meltype/Updater.cs
+tools/Test-SetupIme.ps1
+tools/make-manifests.mjs
+tools/report-form/Code.gs
+tools/report-form/README.md

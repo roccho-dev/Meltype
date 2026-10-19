@@ -1,0 +1,35 @@
+name: fork-surface
+
+# この fork が upstream (yksr-melt/Meltype) のファイルを変えた・消したのは、.github/fork-surface.txt に書いたものだけか。
+# 足したファイル (linux/tty など) は拡張なので数えない。一覧に無い変更・削除と、もう変えていないのに一覧に残っているものは失敗にする。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  surface:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Upstream files are changed or deleted only as listed
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags https://github.com/yksr-melt/Meltype.git main
+          base="$(git merge-base HEAD FETCH_HEAD)"
+          git -c core.quotepath=off diff --no-renames --name-only --diff-filter=MDT "$base" HEAD | LC_ALL=C sort > "$RUNNER_TEMP/surface"
+          sed -e '/^#/d' -e '/^$/d' .github/fork-surface.txt | LC_ALL=C sort > "$RUNNER_TEMP/allowed"
+          LC_ALL=C comm -23 "$RUNNER_TEMP/surface" "$RUNNER_TEMP/allowed" > "$RUNNER_TEMP/outside"
+          LC_ALL=C comm -13 "$RUNNER_TEMP/surface" "$RUNNER_TEMP/allowed" > "$RUNNER_TEMP/stale"
+          echo "upstream base $base: changed or deleted $(wc -l < "$RUNNER_TEMP/surface"), not listed $(wc -l < "$RUNNER_TEMP/outside"), listed but unchanged $(wc -l < "$RUNNER_TEMP/stale")"
+          sed 's|^|::error::not in .github/fork-surface.txt: |' "$RUNNER_TEMP/outside"
+          sed 's|^|::error::in .github/fork-surface.txt but not changed: |' "$RUNNER_TEMP/stale"
+          test ! -s "$RUNNER_TEMP/outside" && test ! -s "$RUNNER_TEMP/stale"
