@@ -14,13 +14,15 @@
    - `src/Meltype/Meltype.csproj`・`src/Meltype.Core/Meltype.Core.csproj` の `<Version>`。版は数字 4 つ (`1.2.1.2` など。`System.Version` で比べられる形) にする
    - `mac/Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` (Mac 版の表示の版は Info.plist から読みます)
 2. コミットして main に入れ、同じ版のタグを付けて push する: `git tag v1.2.1.2 && git push origin v1.2.1.2`
-3. GitHub Actions が Windows (build.yml)・Mac (mac.yml)・Linux (linux.yml) の配布物を作り、リリースに付ける
-   - Windows: `Meltype-<版>-windows.zip`。build.yml は、タグの版とビルドした `Meltype.exe` の版 (ProductVersion) が違えば止まり、zip にビルドの出自の証明 (artifact attestation) を付けます
+3. GitHub Actions が Windows (fork-build.yml)・Mac (mac.yml)・Linux (fork-linux.yml) の配布物を作り、リリースに付ける
+   - Windows: `Meltype-<版>-windows.zip`。fork-build.yml は、タグの版とビルドした `Meltype.exe` の版 (ProductVersion) が違えば止まり、zip にビルドの出自の証明 (artifact attestation) を付けます
    - Mac: `Meltype-<版>-mac.zip`、Linux: `Meltype-<版>-linux.zip` (どちらもプレビュー版)
 4. リリースのページにリリースノートを書く (プレリリースにはしない。自動更新は最新のリリース (latest) だけを見ます)
 5. 使っている人の Meltype (Windows) は、自動で新しい版に更新されます (この fork のリリースだけを見ます)
 
 配布物の出自は `gh attestation verify <zip> --repo roccho-dev/Meltype` で確かめられます。
+
+upstream の `build.yml`・`linux.yml` は upstream の版のまま置き、この fork では Actions の設定で止めています (`gh workflow disable build.yml`、`gh workflow disable linux.yml`)。
 
 <br>
 

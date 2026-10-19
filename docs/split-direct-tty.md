@@ -22,7 +22,7 @@ Linux run `38350288872` でChrome/cdp-ttyなしの実bcon＋Bash/nano試験が�
 | `src/Meltype.Core/Composition/MeltypeSession.cs`, `src/Meltype.Mac.Native/ProposalExports.cs` | 既存Coreと最小の公開接点を維持 |
 | TTY回帰・実Native・実CLI試験 | Bの同版必須checkへ継承 |
 | `linux/tty/tests/bcon.py` / `bcon.nix` | BはShell/Editor単独。Browser/DOM結合の旧原本はPR #2固定commitに保持し、Cへ引継ぐ |
-| `.github/workflows/linux.yml`, `linux/build.sh` | Bの同版配布・実bcon単独試験。Cの結合checkとの対応を維持 |
+| `.github/workflows/fork-linux.yml`, `linux/build.sh` | Bの同版配布・実bcon単独試験。Cの結合checkとの対応を維持 |
 
 ## Bの受入と能力の区別
 
