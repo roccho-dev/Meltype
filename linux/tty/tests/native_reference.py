@@ -5,6 +5,7 @@ The diagnostic latch delays worker dispatch AFTER the real HTTP response has
 arrived. It changes no request deadline and injects no response into Native.
 It proves one finite source/session handoff, not actual private/provider use.
 """
+import ctypes
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -24,6 +25,15 @@ PACKAGE = Path(sys.argv[1]).resolve()
 TOOLS = Path(sys.argv[2]).resolve()
 sys.path.insert(0, str(PACKAGE / "tty"))
 from meltype_tty import NativeSession, InputBridge, effect_bytes, write_all
+
+
+def take_selection(native):
+    """The Core export itself (meltype_proposals_selected); meltype-tty never reads the selection."""
+    if not native.proposal: return None
+    native.lib.meltype_proposals_selected.argtypes = [ctypes.c_void_p]
+    native.lib.meltype_proposals_selected.restype = ctypes.c_void_p
+    pointer = native.lib.meltype_proposals_selected(native.proposal)
+    return native._result(pointer) if pointer else None
 
 
 def require(condition, message):
@@ -180,7 +190,7 @@ try:
         old.focus(False)
         old.close()
         stop_host(hosts[0])  # Normal source rebind ends the old host and its children.
-        require(old.poll_proposals() is None and old.take_selection() is None, "closed session retained activity")
+        require(old.poll_proposals() is None and take_selection(old) is None, "closed session retained activity")
 
         r1 = version("accepted_for_proposal")
         current_url = host(r1)
@@ -221,10 +231,10 @@ try:
         write_all(master, committed)
         require(select.select([slave], [], [], 1)[0], "PTY did not receive reference")
         require(os.read(slave, len(committed)) == committed, "PTY reference differs")
-        require(current.take_selection() == {**current_queries[0], "proposal": after}, "original selection changed")
-        require(current.take_selection() is None, "selection was published twice")
+        require(take_selection(current) == {**current_queries[0], "proposal": after}, "original selection changed")
+        require(take_selection(current) is None, "selection was published twice")
         require(bridge.feed(b"\r") == b"\r", "second Enter recommitted the reference")
-        require(current.take_selection() is None, "second Enter selected a duplicate")
+        require(take_selection(current) is None, "second Enter selected a duplicate")
         release.set()
         transport.worker.join(timeout=1)
         require(not transport.worker.is_alive(), "old worker did not finish")
@@ -233,7 +243,7 @@ try:
         with transport.condition:
             require(transport.closed and transport.pending is None and transport.latest is None
                 and transport.response is None, "old response survived closed transport")
-        require(current.poll_proposals() is None and current.take_selection() is None,
+        require(current.poll_proposals() is None and take_selection(current) is None,
             "old dispatch changed the new committed session")
         require(not select.select([old_slave, slave], [], [], 0)[0], "late dispatch added a PTY effect")
         require(len(calls) == 2, "unexpected provider calls or retry")

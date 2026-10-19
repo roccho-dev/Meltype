@@ -36,6 +36,12 @@ class NativeProposalProof(unittest.TestCase):
         pointer=self.native.lib.meltype_proposals_request(self.native.proposal)
         self.assertTrue(pointer)
         return self.native._result(pointer)
+    def selected(self):
+        # The Core export itself (meltype_proposals_selected); meltype-tty never reads the selection.
+        lib=self.native.lib
+        lib.meltype_proposals_selected.argtypes=[ctypes.c_void_p];lib.meltype_proposals_selected.restype=ctypes.c_void_p
+        pointer=lib.meltype_proposals_selected(self.native.proposal)
+        return self.native._result(pointer) if pointer else None
     def candidate(self,id,text='同じ表示'):
         return {'id':id,'representation':text,'meaning':{'kind':'text','value':id},'evidence':['source',id]}
     def response(self,q,candidates=None,body=None):
@@ -57,9 +63,9 @@ class NativeProposalProof(unittest.TestCase):
         self.assertEqual(self.bridge.view['candidates'],['同じ表示','同じ表示'])
         self.send(b'\x1b[B')
         self.assertEqual(self.send(b'\r'),'同じ表示'.encode())
-        chosen=self.native.take_selection()
+        chosen=self.selected()
         self.assertEqual(chosen,{'generation':q['generation'],'raw':'u','proposal':self.candidate('B')})
-        self.assertIsNone(self.native.take_selection())
+        self.assertIsNone(self.selected())
         self.response(q,[self.candidate('old')]);self.assertIsNone(self.bridge.view)
     def test_evidence_is_available_before_choice_and_matches_selected_original(self):
         self.send(b'u');q=self.query()
@@ -72,7 +78,7 @@ class NativeProposalProof(unittest.TestCase):
         self.assertEqual(json.loads(self.bridge.view['meaning']),rows[1]['meaning'])
         self.assertEqual(json.loads(self.bridge.view['notes'][self.bridge.view['selectedIndex']]),rows[1]['evidence'])
         self.assertEqual(self.send(b'\r'),'同じ表示'.encode())
-        self.assertEqual(self.native.take_selection()['proposal'],rows[1])
+        self.assertEqual(self.selected()['proposal'],rows[1])
 
     def test_latest_aba_cancel_retains_raw_and_rejects_old_response(self):
         self.send(b'u');q1=self.query();self.send(b'x');q2=self.query()
@@ -88,23 +94,23 @@ class NativeProposalProof(unittest.TestCase):
     def test_target_aba_or_unknown_refuses_selection(self):
         self.send(b'u');q=self.query();self.response(q,[self.candidate('A')])
         self.native.bind_target('fixed-child-B');self.native.bind_target('fixed-child-A')
-        self.assertEqual(self.send(b'\r'),b'');self.assertIsNone(self.native.take_selection())
+        self.assertEqual(self.send(b'\r'),b'');self.assertIsNone(self.selected())
         self.send(b'u');q=self.query();self.response(q,[self.candidate('B')])
         self.native.focus(False)
-        self.assertEqual(self.send(b'\r'),b'');self.assertIsNone(self.native.take_selection())
+        self.assertEqual(self.send(b'\r'),b'');self.assertIsNone(self.selected())
     def test_duplicate_ids_or_invalid_json_produce_no_candidate_effect(self):
         self.send(b'u');q=self.query();self.response(q,[self.candidate('A'),self.candidate('A')])
-        self.assertFalse(self.bridge.view['candidates']);self.assertIsNone(self.native.take_selection())
+        self.assertFalse(self.bridge.view['candidates']);self.assertIsNone(self.selected())
         self.send(b'x');q=self.query();self.response(q,body='{bad json')
         self.assertFalse(self.bridge.view['candidates']);self.assertEqual(self.bridge.view['text'],'ux')
     def test_control_character_candidate_is_not_a_command(self):
         self.send(b'u');q=self.query();self.response(q,[self.candidate('A','unexpected\ncommand')])
         self.assertFalse(self.bridge.view['candidates'],'unsafe text must not be offered as a selectable candidate')
         self.assertEqual(self.bridge.view['text'],'う','the existing native preedit must remain')
-        self.assertIsNone(self.native.take_selection())
+        self.assertIsNone(self.selected())
         self.send(b'\x1b[21~')  # F10 recovers the original raw spelling, not provider text.
         self.assertEqual(self.send(b'\r'),b'u')
-        self.assertIsNone(self.native.take_selection())
+        self.assertIsNone(self.selected())
     def test_unknown_target_does_not_publish_a_provider_query(self):
         self.native.focus(False)
         self.assertEqual(self.send(b'u'),b'')
@@ -123,7 +129,7 @@ class NativeProposalProof(unittest.TestCase):
         self.assertEqual(q['raw'],'ux')
         self.response(q,[self.candidate('fresh','新しい')])
         self.assertEqual(self.send(b'\r'),'新しい'.encode())
-        self.assertEqual(self.native.take_selection()['proposal']['id'],'fresh')
+        self.assertEqual(self.selected()['proposal']['id'],'fresh')
 
     def test_mixed_text_and_action_refuses_the_whole_response_in_both_orders(self):
         text=self.candidate('text','must not be filtered through')
@@ -134,7 +140,7 @@ class NativeProposalProof(unittest.TestCase):
             q=self.query()
             self.response(q,rows)
             self.assertFalse(self.bridge.view['candidates'],'mixed response must not be filtered or reordered')
-            self.assertIsNone(self.native.take_selection())
+            self.assertIsNone(self.selected())
             # Cancel the user's raw preedit, not a provider text or action.
             for _ in range(2):
                 if self.bridge.view is None: break
@@ -144,7 +150,7 @@ class NativeProposalProof(unittest.TestCase):
         self.send(b'u');q=self.query()
         self.response(q,[self.candidate('fresh','新しい')])
         self.assertEqual(self.send(b'\r'),'新しい'.encode())
-        self.assertEqual(self.native.take_selection()['proposal']['id'],'fresh')
+        self.assertEqual(self.selected()['proposal']['id'],'fresh')
 
     def test_nontext_proposal_cannot_become_a_terminal_commit(self):
         self.send(b'u');q=self.query()
@@ -152,10 +158,10 @@ class NativeProposalProof(unittest.TestCase):
         action['meaning']={'kind':'action','name':'some-action'}
         self.response(q,[action])
         self.assertFalse(self.bridge.view['candidates'],'an action is not a text insertion')
-        self.assertIsNone(self.native.take_selection())
+        self.assertIsNone(self.selected())
         self.send(b'\x1b[21~')
         self.assertEqual(self.send(b'\r'),b'u')
-        self.assertIsNone(self.native.take_selection())
+        self.assertIsNone(self.selected())
     def queued_query_ends(self, ending):
         # The first query has really reached localhost. Hold only that response
         # so a newer raw input is pending, not yet acquired by the HTTP worker.
@@ -196,7 +202,7 @@ class NativeProposalProof(unittest.TestCase):
                 # InputBridge uses CommitPending before forwarding a command.
                 self.assertEqual(self.send(b'\x01'),b'ux\x01')
                 self.assertIsNone(self.bridge.view)
-            self.assertIsNone(self.native.take_selection())
+            self.assertIsNone(self.selected())
             with self.native.transport.condition:
                 self.assertIsNone(self.native.transport.pending,'ended query was still queued for transmission')
                 self.assertIsNone(self.native.transport.latest)
@@ -220,8 +226,8 @@ class NativeProposalProof(unittest.TestCase):
             self.assertEqual([q['raw'] for q in seen],['u','z'])
             self.assertEqual(self.bridge.view['candidates'],['確認候補'])
             self.assertEqual(self.send(b'\r'),'確認候補'.encode())
-            self.assertEqual(self.native.take_selection()['proposal']['id'],'live-local')
-            self.assertIsNone(self.native.take_selection())
+            self.assertEqual(self.selected()['proposal']['id'],'live-local')
+            self.assertIsNone(self.selected())
         finally:
             release.set();server.shutdown();server.server_close();worker.join(1)
 
@@ -257,7 +263,7 @@ class NativeProposalProof(unittest.TestCase):
                 time.sleep(.005)
             self.assertEqual(self.bridge.view['candidates'],['HTTP候補'])
             self.assertEqual(self.send(b'\r'),'HTTP候補'.encode())
-            self.assertEqual(self.native.take_selection()['proposal']['id'],'http')
+            self.assertEqual(self.selected()['proposal']['id'],'http')
             self.assertEqual(seen[0]['raw'],'u')
         finally: server.shutdown();server.server_close()
 
