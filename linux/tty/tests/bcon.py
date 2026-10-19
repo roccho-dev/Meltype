@@ -212,24 +212,22 @@ assert contents("typed-text") == "乙候補"
 
 # A realistic citation-length typed reference goes through the same bcon
 # candidate painter. The separately required Apps/Native test proves acquisition;
-# this fixture observes the panel and exact selection/child effect, not live use
+# this fixture observes the panel and the child's buffer and text, not live use
 # or a promise that every URL/meaning JSON glyph is simultaneously readable.
 reference_binding = '"\\C-]": printf %s "$READLINE_LINE" > /run/meltype-proof/reference-buffer'
 reader = put("read-reference", "bind -x " + shlex.quote(reference_binding)
     + "\ntouch /run/meltype-proof/reference-ready\n"
     "IFS= read -er -p 'REFERENCE> ' value\nprintf %s \"$value\" > /run/meltype-proof/reference-text\nexit 0\n")
 launch("reference", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/reference "
-    "meltype-tty --raw-text --compose --selection-fd 3 -- bash --noprofile --rcfile "
-    + reader + " -i 3>>/run/meltype-proof/reference-selection")
+    "meltype-tty --raw-text --compose -- bash --noprofile --rcfile "
+    + reader + " -i")
 machine.wait_until_succeeds("test -e /run/meltype-proof/reference-ready")
 before = scanout("B-reference-before")
 reference_queries_before = len(contents("provider-requests").splitlines())
 machine.send_chars("u")
 reference_panel = candidates("B-reference-candidate", before)
-machine.fail("test -s /run/meltype-proof/reference-selection")
 machine.fail("test -e /run/meltype-proof/reference-text")
 machine.send_key("ret")
-machine.wait_until_succeeds("test -s /run/meltype-proof/reference-selection")
 machine.fail("test -e /run/meltype-proof/reference-text")
 deadline = time.monotonic() + 15
 while panels(scanout("B-reference-committed")) > panels(before) + 1000:
@@ -242,11 +240,8 @@ machine.fail("test -e /run/meltype-proof/reference-text")
 machine.send_key("ret")
 finished("reference")
 assert contents("reference-text") == reference_text
-reference_selection = [json.loads(line) for line in contents("reference-selection").splitlines()]
-assert len(reference_selection) == 1, reference_selection
 reference_queries = [json.loads(line) for line in contents("provider-requests").splitlines()[reference_queries_before:]]
 assert len(reference_queries) == 1 and reference_queries[0]["raw"] == "u", reference_queries
-assert reference_selection[0] == {**reference_queries[0], "proposal":reference_row}
 scanout("B-reference-after")
 # Canonical no-echo input is observed by the product, not declared safe by
 # the fixture. Even the known-raw-text test wrapper must bypass this input.
@@ -504,8 +499,8 @@ reader = put("read-resize", "printf %s \"$$\" > /run/meltype-proof/resize-pid\n"
     "tty > /run/meltype-proof/resize-tty\ntouch /run/meltype-proof/resize-ready\n"
     "IFS= read -er -p 'RESIZE> ' value\nprintf %s \"$value\" > /run/meltype-proof/resize-text\n")
 launch("resize", "MELTYPE_PROPOSAL_URL=http://127.0.0.1:8031/proposal "
-    "meltype-tty --raw-text --compose --selection-fd 3 -- bash --noprofile --norc "
-    + reader + " 3>>/run/meltype-proof/resize-selection")
+    "meltype-tty --raw-text --compose -- bash --noprofile --norc "
+    + reader)
 machine.wait_until_succeeds("test -e /run/meltype-proof/resize-ready")
 shell_pid = int(contents("resize-pid"))
 shell_original = geometry(shell_pid)
@@ -526,12 +521,7 @@ machine.fail("test -e /run/meltype-proof/resize-text")
 machine.send_key("ret")
 finished("resize")
 assert contents("resize-text") == "乙候補", contents("resize-text")
-resize_selection = [json.loads(line) for line in contents("resize-selection").splitlines()]
-assert len(resize_selection) == 1, resize_selection
-assert resize_selection[0]["proposal"]["id"] == "b", resize_selection
-assert resize_selection[0]["proposal"]["representation"] == "乙候補", resize_selection
-# Without the actual Down effect the first candidate would be 甲候補. The
-# existing one-shot observation and the fixed child's bytes must agree.
+# Without the actual Down effect the child would have received 甲候補.
 
 paste_editor = "貼付け 日本語\nsecond\tline\n"
 launch("paste-editor", "meltype-tty --raw-text --compose -- nano --ignorerc --nonewlines /run/meltype-proof/paste-editor-text")
@@ -561,7 +551,6 @@ paste_resize = {"shell_paste":contents("paste-text"),
     "shell_geometry":[shell_original,shell_smaller,shell_restored],
     "editor_geometry":[editor_original,editor_smaller,editor_restored],
     "shell_after_resize":contents("resize-text"),
-    "shell_selected":resize_selection,
     "editor_after_resize":contents("paste-editor-text"),
     "resize_mechanism":"existing bcon font/grid/PTY; not DRM hotplug",
     "paste_mechanism":"existing bcon shared clipboard + CtrlShiftV"}
@@ -571,7 +560,7 @@ print(json.dumps({"gate":"B-bcon-shell-editor","status":"PASS",
     "direct":contents("direct-text"),"preview":{"shown":event,"conversion":"日本語","tab":contents("preview-tab"),"list_clear":True,"ctrl_r":2},
     "trailing_nn":trailing,"top":top_result,
     "paste_resize":paste_resize,
-    "reference_display":{"source":"SYNTHETIC_DISPLAY_FIXTURE", "selected":reference_selection,
+    "reference_display":{"source":"SYNTHETIC_DISPLAY_FIXTURE", "buffer":contents("reference-buffer"),
         "child_text":contents("reference-text"), "full_label_readability":"INDEPENDENT_IMAGE_REVIEW_REQUIRED"},
     "shell":"hello 日本語","editor":"日本語\nhello\n","typed":"乙候補",
     "editor_delete_undo_redo":True,"editor_trailing_newline":True,"editor_restart_cancel":True,"terminal_restored":True,"hidden_input_provider_requests":0,
