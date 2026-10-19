@@ -89,5 +89,11 @@ display_factory=None
         self.assertIn(b'FINAL_OUTPUT', output)
 
 
+class PackageTests(unittest.TestCase):
+    def test_no_supply_publisher_without_a_consumer(self):
+        # resources pins only the release zip and the source tag; nothing reads meltype-supply.json.
+        self.assertFalse((ROOT / 'supply.py').exists())
+
+
 if __name__ == '__main__':
     unittest.main()
