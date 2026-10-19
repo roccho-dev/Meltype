@@ -340,6 +340,13 @@ class Observation(unittest.TestCase):
                 with self.assertRaises(ValueError): m.validate_observation_fd(readonly)
             finally: os.close(readonly)
 
+    def test_selection_fd_is_not_an_option(self):
+        argv=['meltype-tty','--native','x','--mozc','y','--transport-proof','--selection-fd','3','--','/bin/true']
+        with patch.object(m.sys,'argv',argv),patch.object(m,'run') as run,patch('sys.stderr'):
+            with self.assertRaises(SystemExit) as caught: m.main()
+        self.assertEqual(caught.exception.code,2)                     # argparse rejects it
+        run.assert_not_called()
+
     def test_an_invalid_preview_fd_is_named_in_the_error(self):
         from unittest.mock import Mock
         with patch.object(m.os,'isatty',return_value=True),patch.object(m.pty,'fork') as fork:
