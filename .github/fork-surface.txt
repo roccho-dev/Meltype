@@ -1,0 +1,3 @@
+# upstream (yksr-melt/Meltype) のファイルのうち、この fork が変えた・消したもの。.github/workflows/fork-surface.yml が確かめる。
+# ここに無い upstream のファイルは変えない・消さない。足したファイルは書かない。
+# 一覧は減らす方向にだけ変える (消したファイルを戻す・workflow を disable する、などの PR で)。
