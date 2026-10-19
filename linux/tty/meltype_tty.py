@@ -82,8 +82,6 @@ class NativeSession:
                 self.lib.meltype_proposals_request.restype = ctypes.c_void_p
                 self.lib.meltype_proposals_receive.argtypes = [ctypes.c_void_p, ctypes.c_longlong, ctypes.c_char_p]
                 self.lib.meltype_proposals_receive.restype = ctypes.c_void_p
-                self.lib.meltype_proposals_selected.argtypes = [ctypes.c_void_p]
-                self.lib.meltype_proposals_selected.restype = ctypes.c_void_p
                 self.proposal = self.lib.meltype_proposals_create(self.session)
                 if not self.proposal: raise UnsafeEffect("native Proposal port unavailable")
                 self.transport = ProposalTransport(proposal_url)
@@ -109,12 +107,6 @@ class NativeSession:
             if response is None: return None
             generation, text = response
             return self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode()))
-
-    def take_selection(self):
-        if not self.proposal: return None
-        with self.lock:
-            pointer = self.lib.meltype_proposals_selected(self.proposal)
-            return self._result(pointer) if pointer else None
 
     def _result(self, pointer):
         if not pointer:
