@@ -8,10 +8,8 @@
 .github/bot/notices.mjs
 .github/bot/sponsors.mjs
 .github/workflows/bot.yml
-.github/workflows/build.yml
 .github/workflows/cla.yml
 .github/workflows/dotnet-update.yml
-.github/workflows/linux.yml
 .github/workflows/notices.yml
 .github/workflows/pr-checks.yml
 .github/workflows/sponsors.yml
