@@ -126,7 +126,7 @@ mode, turns previews off (the reason is kept) rather than stopping input.
 Without `--preview` nothing differs from 1.2.1.5: in particular the candidate
 image never draws the Core's own key hint. `--preview-fd` explicitly records,
 in an append-only file, what was shown, where, and when it was hidden; it holds
-the previewed word and is off by default, like `--selection-fd`.
+the previewed word and is off by default.
 
 While a composition is shown, Ctrl+U/P/O go to the Core's existing switch to
 hiragana / full-width / half-width (as Windows Meltype's F6/F9/F10), without
