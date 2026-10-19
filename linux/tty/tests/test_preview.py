@@ -340,6 +340,14 @@ class Observation(unittest.TestCase):
                 with self.assertRaises(ValueError): m.validate_observation_fd(readonly)
             finally: os.close(readonly)
 
+    def test_an_invalid_preview_fd_is_named_in_the_error(self):
+        from unittest.mock import Mock
+        with patch.object(m.os,'isatty',return_value=True),patch.object(m.pty,'fork') as fork:
+            with self.assertRaises(ValueError) as caught: m.run(['/bin/true'],Mock(),preview_fd=1)
+            fork.assert_not_called()
+        self.assertIn('--preview-fd',str(caught.exception))
+        self.assertNotIn('selection',str(caught.exception))
+
     def test_invalid_observer_never_starts_child(self):
         from unittest.mock import Mock
         with patch.object(m.os,'isatty',return_value=True),patch.object(m.pty,'fork') as fork:

@@ -831,15 +831,15 @@ def capture_allowed(master, raw_text=False):
     return bool(flags & termios.ECHO) or bool(raw_text and not flags & termios.ICANON)
 
 
-def validate_observation_fd(fd):
-    """Explicit caller-owned append-only file; never a terminal or blocking pipe."""
+def validate_observation_fd(fd, option="--selection-fd"):
+    """Explicit caller-owned append-only file; never a terminal or blocking pipe. The error names `option`."""
     if fd is None: return
     if type(fd) is not int or fd < 3:
-        raise ValueError("selection fd must be separate from terminal stdio")
+        raise ValueError(f"{option} must be separate from terminal stdio")
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
     if (not stat.S_ISREG(os.fstat(fd).st_mode) or
             flags & os.O_ACCMODE == os.O_RDONLY or not flags & os.O_APPEND):
-        raise ValueError("selection fd must be a writable append-only regular file")
+        raise ValueError(f"{option} must be a writable append-only regular file")
     os.set_inheritable(fd, False)
 
 
@@ -872,7 +872,7 @@ def run(argv, make_native, make_display=None, raw_text=False, selection_fd=None,
     if not os.isatty(0) or not os.isatty(1):
         raise UnsafeEffect("requires an interactive TTY")
     validate_observation_fd(selection_fd)
-    validate_observation_fd(preview_fd)
+    validate_observation_fd(preview_fd, "--preview-fd")
     original = termios.tcgetattr(0)
     reader, writer = os.pipe()
     try:
