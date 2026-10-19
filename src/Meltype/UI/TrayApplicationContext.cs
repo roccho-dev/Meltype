@@ -107,8 +107,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             LightTheme = () => _engine.Settings.CompositionIsLight(Meltype.Composition.CompositionWindow.WindowsUsesLightTheme()),
             Opacity = () => _engine.Settings.CompositionOpacityValue,
         });
-        _proposals = Composition.ProposalHttpPort.FromEnvironment(_invoker, () => Composition.ProposalTarget.Capture(_composition.Focus));
-        if (_proposals is not null) _composition.Controller.AttachProposals(_proposals);
+        _proposals = Composition.ProposalHttpPort.AttachFromEnvironment(_composition.Controller.AttachProposals, _invoker, () => Composition.ProposalTarget.Capture(_composition.Focus));
         _engine.AttachComposition(_composition);
         _tipServer = new Tip.TipServer(_invoker, _composition, () => _engine.Settings);
         _tipServer.Start();

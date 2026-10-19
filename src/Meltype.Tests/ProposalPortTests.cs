@@ -48,4 +48,16 @@ internal static class ProposalPortTests
             Assert.True(port is not null, $"同じ PC の送り先は使う: {url}");
         }
     }
+
+    [Test]
+    public static void Tray_AttachesOnlyAUsablePort()
+    {
+        var attached = new List<Composition.IProposalPort?>();
+        Composition.ProposalHttpPort? Attach(string? value) =>
+            WithEndpoint(value, () => Composition.ProposalHttpPort.AttachFromEnvironment(attached.Add, Invoker, () => null));
+        Assert.True(Attach(null) is null && attached.Count == 0, "未設定なら Controller に何も付けない (従来どおり)");
+        Assert.True(Attach("http://example.com/proposals") is null && attached.Count == 0, "同じ PC でない送り先なら何も付けない");
+        using var port = Attach("http://127.0.0.1:8765/proposals");
+        Assert.True(port is not null && attached.Count == 1 && ReferenceEquals(attached[0], port), "使える送り先なら、その口を 1 回だけ付ける");
+    }
 }

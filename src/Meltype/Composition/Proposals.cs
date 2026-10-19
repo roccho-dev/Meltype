@@ -124,13 +124,22 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     {
         var value = Environment.GetEnvironmentVariable(EndpointVariable);
         if (string.IsNullOrWhiteSpace(value)) return null;
+        // 打っている文字を送るので、送り先は同じ PC (localhost・127.0.0.1・::1) だけ。
         if (!Uri.TryCreate(value, UriKind.Absolute, out var endpoint)
-            || endpoint.Scheme is not ("http" or "https"))
+            || endpoint.Scheme is not ("http" or "https") || !endpoint.IsLoopback)
         {
-            Diagnostics.Log.Warn($"{EndpointVariable} が有効な http(s) URL ではないため Proposal を無効にします。");
+            Diagnostics.Log.Warn($"{EndpointVariable} が同じ PC (localhost) の http(s) URL ではないため Proposal を無効にします。");
             return null;
         }
         return new ProposalHttpPort(invoker, endpoint, currentTarget);
+    }
+
+    /// <summary>トレイが起動時に呼ぶ。使える送り先があるときだけ attach に渡す (無ければ何も付けず null、従来どおり)。</summary>
+    public static ProposalHttpPort? AttachFromEnvironment(Action<IProposalPort> attach, Control invoker, Func<ProposalTarget?> currentTarget)
+    {
+        var port = FromEnvironment(invoker, currentTarget);
+        if (port is not null) attach(port);
+        return port;
     }
 
     public void Request(ProposalQuery query, Action<ProposalResponse> receive)
