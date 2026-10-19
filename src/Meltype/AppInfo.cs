@@ -27,7 +27,7 @@ internal static class AppInfo
 
     /// <summary>
     /// 自動更新で最新のリリースを見に行く GitHub のリポジトリ (公開されている必要がある)。この fork のリリースだけを使う
-    /// (build.yml の CI がビルドしたリポジトリ GITHUB_REPOSITORY と同じであることをテストで確かめる)。
+    /// (fork-build.yml の CI がビルドしたリポジトリ GITHUB_REPOSITORY と同じであることをテストで確かめる)。
     /// </summary>
     public const string UpdateRepository = "roccho-dev/Meltype";
     public const string Contact = "ibutya0319@gmail.com";

@@ -157,7 +157,7 @@ def main():
     source_nar = source_identity(command(nix + ["eval", "--json", "--expr", expression], root), rev)
     result = {"schema": "meltype-linux-supply/1", "repository": REPOSITORY,
         "source": {"rev": rev, "tree": tree, "narHash": source_nar},
-        "producer": {"workflow": ".github/workflows/linux.yml",
+        "producer": {"workflow": ".github/workflows/fork-linux.yml",
             "run": owner["run"], "attempt": owner["attempt"]},
         "artifact": {"id": owner["artifact"], "sha256": owner["digest"],
             "member": archive.name, "memberSize": archive.stat().st_size,
