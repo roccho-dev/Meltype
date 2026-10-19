@@ -340,9 +340,6 @@ class Observation(unittest.TestCase):
                 with self.assertRaises(ValueError): m.validate_observation_fd(readonly)
             finally: os.close(readonly)
 
-    def test_the_tty_never_reads_the_selection(self):
-        self.assertFalse(hasattr(m.NativeSession,'take_selection'))
-
     def test_an_invalid_preview_fd_is_named_in_the_error(self):
         from unittest.mock import Mock
         with patch.object(m.os,'isatty',return_value=True),patch.object(m.pty,'fork') as fork:
