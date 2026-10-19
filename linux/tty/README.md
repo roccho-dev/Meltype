@@ -47,23 +47,6 @@ pinned B source revision together with a separately verified immutable
 artifact/source hash. This export is not a substitute for its source/version
 admission and does not imply that C's integration tests have passed.
 
-The normal Linux producer also publishes `meltype-linux-supply-<commit>` after
-its same-build Native/CLI and bcon VM tests succeed. Its `meltype-linux-supply/1`
-receipt binds its own immutable GitHub source revision/tree/fetchTree NAR,
-run/attempt and uploaded runtime artifact identity to the actual distribution
-ZIP and package NAR. It expands that ZIP with the ordinary `unzip` path and
-requires identical files, executable modes, directories and NAR to the tested
-build directory. Binary and TTY entry hashes are included. The receipt is
-outside the runtime package and is covered by the existing provenance action.
-
-This producer has no consumer pin or arbitrary repository/artifact selector.
-It does not calculate another owner's inputs, update C or grant acceptance.
-The source NAR describes the immutable GitHub fetchTree, not a working checkout
-containing `.git`, build output or audit files. The package NAR is distinct from
-both the inner ZIP hash and the GitHub artifact ZIP hash. A consumer must still
-verify the actual producer/run/head and downloaded bytes; this receipt and CI
-success do not establish B4, physical evidence or the combined product's result.
-
 ## Source and ownership
 
 Reuse: old PR #2 at `d673872560f7e6b3b20fed1452f6949c55c722f1`.
