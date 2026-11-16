@@ -102,7 +102,7 @@ jobs:
       - name: Publish selected candidate once
         run: |
           set -euo pipefail
-          state="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
+          state="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$EXPECTED_COMMIT" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
           flags=("--prerelease=$IS_PRERELEASE" "--latest=$MAKE_LATEST")
           case "$state" in
             create) gh release create "$RELEASE_TAG" --verify-tag --notes-file dist/promotion-notes.md "${flags[@]}" dist/Meltype-*.zip dist/windows-candidate.json dist/linux-candidate.json ;;
@@ -110,5 +110,5 @@ jobs:
             accepted) echo 'Selected source and tested bytes are already published with the requested state.' ;;
             *) echo 'Unknown release state; no write performed.' >&2; exit 1 ;;
           esac
-          observed="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
+          observed="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$EXPECTED_COMMIT" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
           test "$observed" = accepted

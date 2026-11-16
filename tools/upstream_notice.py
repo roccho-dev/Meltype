@@ -18,6 +18,23 @@ def fetch_json(path):
         return json.load(response)
 
 
+def resolve_tag(repository, tag, fetch=fetch_json):
+    base = f"repos/{repository}"
+    ref = fetch(f"{base}/git/ref/tags/{quote(tag, safe='')}")
+    if not isinstance(ref, dict):
+        raise ValueError("selected tag does not exist")
+    obj = ref["object"]
+    seen = set()
+    while obj["type"] == "tag":
+        if obj["sha"] in seen or len(seen) >= 8:
+            raise ValueError("cyclic or excessive annotated tag chain")
+        seen.add(obj["sha"])
+        obj = fetch(f"{base}/git/tags/{obj['sha']}")["object"]
+    if obj["type"] != "commit" or not re.fullmatch(r"[0-9a-f]{40}", obj["sha"]):
+        raise ValueError("selected tag does not resolve to one commit")
+    return obj["sha"]
+
+
 def observe(pin, fetch=fetch_json):
     if pin.get("repository") != "yksr-melt/Meltype" or not re.fullmatch(r"[0-9a-f]{40}", pin.get("commit", "")):
         raise ValueError("invalid selected upstream identity")
@@ -26,20 +43,12 @@ def observe(pin, fetch=fetch_json):
     if release.get("draft") or release.get("prerelease"):
         raise ValueError("release observation is not stable")
     tag = release["tag_name"]
-    obj = fetch(f"{base}/git/ref/tags/{quote(tag, safe='')}")["object"]
-    seen = set()
-    while obj["type"] == "tag":
-        if obj["sha"] in seen or len(seen) >= 8:
-            raise ValueError("cyclic or excessive annotated tag chain")
-        seen.add(obj["sha"])
-        obj = fetch(f"{base}/git/tags/{obj['sha']}")["object"]
-    if obj["type"] != "commit" or not re.fullmatch(r"[0-9a-f]{40}", obj["sha"]):
-        raise ValueError("stable release does not resolve to one commit")
-    if tag == pin["tag"] and obj["sha"] != pin["commit"]:
+    commit = resolve_tag(pin["repository"], tag, fetch)
+    if tag == pin["tag"] and commit != pin["commit"]:
         raise ValueError("selected upstream tag moved; do not silently redefine its source")
     return {
         "schema": "meltype.upstream-observation.v1", "selected": pin,
-        "observed": {"tag": tag, "commit": obj["sha"], "releaseId": release["id"],
+        "observed": {"tag": tag, "commit": commit, "releaseId": release["id"],
                      "publishedAt": release["published_at"],
                      "assets": [{"name": asset["name"], "bytes": asset["size"], "digest": asset.get("digest")}
                                 for asset in release.get("assets", [])]},

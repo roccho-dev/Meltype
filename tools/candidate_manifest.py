@@ -84,6 +84,8 @@ def main():
         if actual_commit != args.commit:
             raise ValueError("candidate source is not the checked-out commit")
         subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], check=True)
+        if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal"], text=True).strip():
+            raise ValueError("candidate source contains nonignored untracked or modified files")
         names = ([f"Meltype-{args.version}-windows.zip", f"Meltype-{args.version}-windows-portable.zip"]
                  if args.kind == "windows" else [f"Meltype-{args.version}-linux.zip"])
         manifest = {

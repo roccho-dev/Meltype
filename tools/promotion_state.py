@@ -13,6 +13,12 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from candidate_manifest import file_identity
+from upstream_notice import resolve_tag
+
+
+def verify_remote_tag(repository, tag, commit, fetch):
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or resolve_tag(repository, tag, fetch) != commit:
+        raise ValueError("remote release tag no longer selects the tested source commit")
 
 
 def decide_release(existing, latest_tag, expected_tag, paths, prerelease, make_latest):
@@ -60,12 +66,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--commit", required=True)
     parser.add_argument("--directory", type=Path, default=Path("dist"))
     parser.add_argument("--prerelease", choices=("true", "false"), required=True)
     parser.add_argument("--make-latest", choices=("true", "false"), required=True)
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):
         raise ValueError("invalid repository")
+    verify_remote_tag(args.repository, args.tag, args.commit, fetch_optional)
     base = f"repos/{args.repository}/releases"
     existing = fetch_optional(base + "/tags/" + quote(args.tag, safe=""))
     latest = fetch_optional(base + "/latest") if args.make_latest == "true" else None

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from candidate_manifest import file_identity
-from promotion_state import decide_release
+from promotion_state import decide_release, verify_remote_tag
 
 
 class OccupiedReleaseTests(unittest.TestCase):
@@ -38,6 +38,15 @@ class OccupiedReleaseTests(unittest.TestCase):
         self.file.write_bytes(b"rebuilt candidate")
         with self.assertRaises(ValueError):
             decide_release(self.release, None, "v1.6.0.1", [self.file], False, True)
+
+    def test_remote_tag_is_rechecked_against_tested_source(self):
+        def selected(path):
+            return {"object": {"type": "commit", "sha": "1" * 40}}
+        verify_remote_tag("roccho-dev/Meltype", "v1.6.0.1", "1" * 40, selected)
+        with self.assertRaises(ValueError):
+            verify_remote_tag("roccho-dev/Meltype", "v1.6.0.1", "2" * 40, selected)
+        with self.assertRaises(ValueError):
+            verify_remote_tag("roccho-dev/Meltype", "v1.6.0.1", "1" * 40, lambda path: None)
 
 
 if __name__ == "__main__":
