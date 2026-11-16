@@ -164,7 +164,7 @@ internal static class ProposalTests
     private static void WindowsMalformedResponseParserIsBoundedInWindowsRunner()
     {
         if (!OperatingSystem.IsWindows()) return;
-        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Tests")) return;
+        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Windows.Tests")) return;
 
         var windows = Assembly.Load("Meltype");
         var type = windows.GetType("Meltype.Composition.ProposalHttpPort")
@@ -183,7 +183,7 @@ internal static class ProposalTests
     private static void WindowsTargetLeaseKeepsOnlyCurrentGenerationAndClosesAllTerminalPaths()
     {
         if (!OperatingSystem.IsWindows()) return;
-        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Tests")) return;
+        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Windows.Tests")) return;
 
         var windows = Assembly.Load("Meltype");
         var leaseType = windows.GetType("Meltype.Composition.ProposalTargetLease")
@@ -233,7 +233,7 @@ internal static class ProposalTests
     private static void WindowsCancellationKeepsCapturedTokenValidUntilAsyncCompletion()
     {
         if (!OperatingSystem.IsWindows()) return;
-        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Tests")) return;
+        if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "Meltype.Windows.Tests")) return;
 
         var windows = Assembly.Load("Meltype");
         var type = windows.GetType("Meltype.Composition.ProposalPendingRequest")
