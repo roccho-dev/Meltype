@@ -20,6 +20,13 @@ def file_identity(path):
     return {"file": path.name, "bytes": path.stat().st_size, "sha256": digest}
 
 
+def bundle_inventory(manifests, directory):
+    names = [item["file"] for manifest in manifests for item in manifest["artifacts"]]
+    if len(names) != len(set(names)) or set(names) != {path.name for path in Path(directory).glob("Meltype-*.zip")}:
+        raise ValueError("candidate bundle contains extra, missing or repeated archives")
+    return sorted(names) + ["windows-candidate.json", "linux-candidate.json"]
+
+
 def verify_provider(run, artifact, repository, commit, workflow_path, artifact_name):
     if (not isinstance(run.get("id"), int) or not isinstance(artifact.get("id"), int) or
             not isinstance(run.get("repository", {}).get("id"), int) or
@@ -58,13 +65,13 @@ def verify(manifest, directory, repository, commit, version, kind):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("create", "verify", "provider"))
+    parser.add_argument("command", choices=("create", "verify", "provider", "bundle"))
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--directory", type=Path, default=Path("dist"))
     parser.add_argument("--repository", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--kind", choices=("windows", "linux"), required=True)
+    parser.add_argument("--kind", choices=("windows", "linux"))
     parser.add_argument("--provider-run", type=Path)
     parser.add_argument("--provider-artifact", type=Path)
     args = parser.parse_args()
@@ -72,6 +79,15 @@ def main():
         raise ValueError("source commit must be immutable")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.]+)?", args.version):
         raise ValueError("candidate version is invalid")
+    if args.command == "bundle":
+        manifests = []
+        for kind in ("windows", "linux"):
+            manifest = json.loads((args.directory / f"{kind}-candidate.json").read_text(encoding="utf-8"))
+            manifests.append(verify(manifest, args.directory, args.repository, args.commit, args.version, kind))
+        print("\n".join(bundle_inventory(manifests, args.directory)))
+        return
+    if args.kind is None:
+        parser.error("--kind is required for this candidate operation")
     if args.command == "provider":
         run = json.loads(args.provider_run.read_text(encoding="utf-8"))
         artifact = json.loads(args.provider_artifact.read_text(encoding="utf-8"))

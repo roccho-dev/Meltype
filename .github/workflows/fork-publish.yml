@@ -93,19 +93,22 @@ jobs:
       - name: Verify tested bytes and build provenance
         run: |
           set -euo pipefail
-          for platform in windows linux; do
-            python3 tools/candidate_manifest.py verify --manifest "dist/$platform-candidate.json" --directory dist \
-              --repository "$GITHUB_REPOSITORY" --commit "$EXPECTED_COMMIT" --version "$CANDIDATE_VERSION" --kind "$platform"
-          done
-          for archive in dist/Meltype-*.zip; do gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY"; done
+          python3 tools/candidate_manifest.py bundle --directory dist --repository "$GITHUB_REPOSITORY" \
+            --commit "$EXPECTED_COMMIT" --version "$CANDIDATE_VERSION" > dist/verified-files.txt
+          while IFS= read -r file; do
+            if [[ "$file" == *.zip ]]; then gh attestation verify "dist/$file" --repo "$GITHUB_REPOSITORY"; fi
+          done < dist/verified-files.txt
           python3 -c 'import json; from pathlib import Path; w=json.loads(Path("dist/windows-candidate.json").read_text()); Path("dist/promotion-notes.md").write_text("検証済み候補の同じ成果物を公開します。"+chr(10)*2+"source: `"+w["sourceCommit"]+"`"+chr(10), encoding="utf-8")'
       - name: Publish selected candidate once
         run: |
           set -euo pipefail
           state="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$EXPECTED_COMMIT" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
           flags=("--prerelease=$IS_PRERELEASE" "--latest=$MAKE_LATEST")
+          mapfile -t files < dist/verified-files.txt
+          paths=()
+          for file in "${files[@]}"; do paths+=("dist/$file"); done
           case "$state" in
-            create) gh release create "$RELEASE_TAG" --verify-tag --notes-file dist/promotion-notes.md "${flags[@]}" dist/Meltype-*.zip dist/windows-candidate.json dist/linux-candidate.json ;;
+            create) gh release create "$RELEASE_TAG" --verify-tag --notes-file dist/promotion-notes.md "${flags[@]}" "${paths[@]}" ;;
             edit) gh release edit "$RELEASE_TAG" "${flags[@]}" ;;
             accepted) echo 'Selected source and tested bytes are already published with the requested state.' ;;
             *) echo 'Unknown release state; no write performed.' >&2; exit 1 ;;

@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from candidate_manifest import file_identity, verify, verify_provider
+from candidate_manifest import bundle_inventory, file_identity, verify, verify_provider
 
 
 class CandidatePromotionTests(unittest.TestCase):
@@ -71,6 +71,13 @@ class CandidatePromotionTests(unittest.TestCase):
             changed["workflow_run"][key] = value
             with self.assertRaises(ValueError):
                 check(run, changed)
+
+    def test_publisher_inventory_refuses_an_unlisted_archive(self):
+        names = bundle_inventory([self.manifest], self.root)
+        self.assertIn(self.file.name, names)
+        (self.root / "Meltype-unreviewed-windows.zip").write_bytes(b"extra bytes")
+        with self.assertRaises(ValueError):
+            bundle_inventory([self.manifest], self.root)
 
 
 if __name__ == "__main__":
