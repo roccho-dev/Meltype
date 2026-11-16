@@ -304,7 +304,7 @@ internal sealed class CompositionWindow : PopupForm
             for (var i = 0; i < items.Count; i++)
             {
                 // 候補の右に注記を出す分だけ広くする
-                var note = view.Notes?[i].ToDisplayText() is { } n ? TextRenderer.MeasureText(g, n, _hintFont).Width + 12 : 0;
+                var note = (view.ProposalEvidence?[i] ?? view.Notes?[i].ToDisplayText()) is { } n ? TextRenderer.MeasureText(g, n, _hintFont).Width + 12 : 0;
                 width = Math.Max(width, TextRenderer.MeasureText(g, $"9  {items[i]}", _candidateFont).Width + 28 + note);
             }
             height += Math.Min(items.Count, PageSize) * (_candidateFont.Height + 4) + 6;
@@ -395,7 +395,7 @@ internal sealed class CompositionWindow : PopupForm
                 DrawText(g, $"{(numbered ? $"{i - first + 1}" : " ")}  {items[i]}", _candidateFont, new Point(12, y),
                     i == selectedItem ? _palette.Text : _palette.Candidate,
                     i == selectedItem ? Blend(Background, Color.FromArgb(60, Accent)) : Background, TextFormatFlags.NoPrefix);
-                if (view.Notes?[i].ToDisplayText() is { } note)
+                if ((view.ProposalEvidence?[i] ?? view.Notes?[i].ToDisplayText()) is { } note)
                 {
                     // 候補の注記を右端に小さく出す
                     var noteWidth = TextRenderer.MeasureText(g, note, _hintFont).Width;

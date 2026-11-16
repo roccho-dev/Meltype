@@ -81,7 +81,7 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
         for (var i = 0; i < items.Count; i++)
         {
             if (i > 0) builder.Append(',');
-            AppendNullable(builder, predictions ? null : view.Notes?[i].ToDisplayText());
+            AppendNullable(builder, predictions ? null : view.ProposalEvidence?[i] ?? view.Notes?[i].ToDisplayText());
         }
         builder.Append("],\"numbered\":").Append(Numbered(view) ? "true" : "false");
         builder.Append(",\"selected\":").Append(predictions ? view.SelectedPrediction : view.SelectedIndex)
@@ -112,7 +112,7 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
     internal static CompositionView ForFront(CompositionView view, bool showGuide, bool numberKeysSelect)
     {
         var predictions = !view.Converting && view.Predictions is { Count: > 0 };
-        var candidates = !predictions && (view.Converting ? view.Candidates.Count > 1 : view.Candidates.Count > 0);
+        var candidates = !predictions && (view.Converting && view.ProposalEvidence is null ? view.Candidates.Count > 1 : view.Candidates.Count > 0);
         return view with
         {
             Text = view.Committed ?? view.Text,
@@ -121,10 +121,11 @@ public sealed record SessionResult(bool Consumed, IReadOnlyList<TextEdit> Commit
             Candidates = candidates ? view.Candidates : [],
             SelectedIndex = candidates ? view.SelectedIndex : -1,
             Notes = candidates ? view.Notes : null,
+            ProposalEvidence = candidates ? view.ProposalEvidence : null,
             Meaning = candidates ? view.Meaning : null,
             Predictions = predictions ? view.Predictions : null,
             SelectedPrediction = predictions ? view.SelectedPrediction : -1,
-            Numbered = candidates && view.Converting && numberKeysSelect,
+            Numbered = candidates && view.Converting && view.ProposalEvidence is null && numberKeysSelect,
         };
     }
 
@@ -506,6 +507,12 @@ public sealed class MeltypeSession
     /// <summary>背景の変換の結果が届いたとき (IBackgroundConverter.ResultReady を入力スレッドに移して呼ぶ)。表示が変わらないなら null (入力していない・候補を開いている)。</summary>
     /// <summary>入力の内容を変えない出来事 (フォーカス・キャレットの知らせなど) の結果。表示は今のまま (変換中ならその表示)。</summary>
     public SessionResult Unchanged() => _controller.Current();
+
+    /// <summary>同じ入力スレッドから意味 Proposal の port を接続する。</summary>
+    public void AttachProposals(IProposalPort? port) => _controller.AttachProposals(port);
+
+    /// <summary>非同期候補の現在の表示だけを返す。以前の確定は再送しない。</summary>
+    public SessionResult ProposalView() => _controller.Current();
 
     public SessionResult? RefreshConversion() => _controller.RefreshConversion();
 

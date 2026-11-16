@@ -138,6 +138,7 @@ public sealed partial class CompositionController
             return;
         }
 
+        if (!_converting && HandleProposalKey(vk)) return;
         if (_converting && HandleConversionKey(vk)) return;
 
         switch (vk)

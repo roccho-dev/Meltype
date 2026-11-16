@@ -69,6 +69,9 @@ internal sealed class CompositionOutput(Func<Config.PunctuationStyle> punctuatio
 
     public void Commit(string text) => Add(text);
 
+    /// <summary>Proposal の representation は元の意味との対応を保つため、句読点を置き換えない。</summary>
+    public void CommitLiteral(string text) => Add(text, literal: true);
+
     /// <summary>直前に確定した文字の末尾から、キャレットを count 文字だけ左へ戻す。</summary>
     public void MoveCaretBackward(int count)
     {
@@ -113,7 +116,7 @@ internal sealed class CompositionOutput(Func<Config.PunctuationStyle> punctuatio
         _view = view with
         {
             Text = Punctuate(view.Text),
-            Candidates = view.Candidates.Select(Punctuate).ToList(),
+            Candidates = view.ProposalEvidence is not null ? view.Candidates : view.Candidates.Select(Punctuate).ToList(),
             Clauses = view.Clauses?.Select(Punctuate).ToList(),
             Suggestion = view.Suggestion is { } suggestion ? Punctuate(suggestion) : null,
             Predictions = view.Predictions?.Select(Punctuate).ToList(),
@@ -156,9 +159,9 @@ internal sealed class CompositionOutput(Func<Config.PunctuationStyle> punctuatio
         _hidden = true;
     }
 
-    private void Add(string text, string? current = null)
+    private void Add(string text, string? current = null, bool literal = false)
     {
-        text = Punctuate(text);
+        if (!literal) text = Punctuate(text);
         current = current is null ? null : Punctuate(current);
         string? expect = null;
         if (_pendingDelete > 0)

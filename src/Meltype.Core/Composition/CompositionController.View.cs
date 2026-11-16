@@ -44,6 +44,7 @@ public sealed partial class CompositionController
 
     private void UpdateView()
     {
+        SyncProposals();
         if (_text.IsEmpty)
         {
             // 英数状態の判定中は何も表示しない (英語ならそのまま出るだけ)。
@@ -70,6 +71,18 @@ public sealed partial class CompositionController
                 MisspellingSuggestion(),
                 Typed: TypedKeys(),
                 Committed: string.Concat(_clauses.Select(c => c.Text)), ContextHint: zenzai ? "Zenzai" : null));
+        }
+        else if (_proposalSession?.HasCandidates == true && _proposalSession.Selected is { } proposal)
+        {
+            _out.Show(new CompositionView(
+                CurrentDisplay(final: false),
+                _proposalSession.Candidates.Select(candidate => candidate.Representation).ToList(),
+                _proposalSession.SelectedIndex,
+                true,
+                "↑↓ Proposal　Enter 選択　Esc 取消",
+                Meaning: proposal.Meaning.ToString(),
+                Suggestion: MisspellingSuggestion(),
+                ProposalEvidence: _proposalSession.Candidates.Select(candidate => candidate.Evidence.ToString()).ToList()));
         }
         else
         {

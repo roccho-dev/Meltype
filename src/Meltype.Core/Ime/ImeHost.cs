@@ -38,9 +38,29 @@ public sealed class ImeHost(IImeEnvironment environment, Func<Settings> settings
     private const int MaxSessions = 16;
 
     private readonly Dictionary<string, ImeSession> _sessions = [];
+    private readonly Dictionary<string, IProposalPort> _proposalPorts = [];
     private static long s_rev;
 
     public int SessionCount => _sessions.Count;
+
+    /// <summary>入力欄ができる前にも接続できる。別の欄の世代・応答を共有しない。</summary>
+    public void AttachProposals(string instance, IProposalPort? port)
+    {
+        if (port is null) _proposalPorts.Remove(instance);
+        else _proposalPorts[instance] = port;
+        if (_sessions.TryGetValue(instance, out var session)) session.AttachProposals(port);
+    }
+
+    /// <summary>古い transport の解放が、新しく接続した port を外さないようにする。</summary>
+    public void DetachProposals(string instance, IProposalPort port)
+    {
+        if (!_proposalPorts.TryGetValue(instance, out var current) || !ReferenceEquals(current, port)) return;
+        _proposalPorts.Remove(instance);
+        if (_sessions.TryGetValue(instance, out var session)) session.AttachProposals(null);
+    }
+
+    public SessionResult ProposalView(string instance) =>
+        _sessions.TryGetValue(instance, out var session) ? session.ProposalView() : new(false, [], null);
 
     /// <summary>JSON の出来事を処理する。読めない・版が違う出来事には、何も受け持たない応答を返す。</summary>
     public string Handle(string json) => (Parse(json) is { } e ? Handle(e) : Inactive()).ToJson();
@@ -72,9 +92,11 @@ public sealed class ImeHost(IImeEnvironment environment, Func<Settings> settings
     {
         foreach (var session in _sessions.Values)
         {
+            session.AttachProposals(null);
             if (session.IsComposing) session.Close();
         }
         _sessions.Clear();
+        _proposalPorts.Clear();
     }
 
     public ImeOutput Handle(ImeEvent e)
@@ -86,7 +108,12 @@ public sealed class ImeHost(IImeEnvironment environment, Func<Settings> settings
         }
         if (e.Type == ImeEventType.InstanceDestroyed)
         {
-            if (_sessions.Remove(e.Instance, out var closing) && closing.IsComposing) closing.Close();
+            _proposalPorts.Remove(e.Instance);
+            if (_sessions.Remove(e.Instance, out var closing))
+            {
+                closing.AttachProposals(null);
+                if (closing.IsComposing) closing.Close();
+            }
             return Inactive();
         }
         if (!_sessions.TryGetValue(e.Instance, out var session))
@@ -101,6 +128,7 @@ public sealed class ImeHost(IImeEnvironment environment, Func<Settings> settings
                 return new(ImeSession.InitialState(active, e.ImeOpen ?? true, current.ForApp(e.Field?.App), ImeSession.IsGame(current, e.Field), ImeSession.AnnouncesFocus(e), NextRev()), Pass);
             }
             session = new ImeSession(environment, settings);
+            if (_proposalPorts.TryGetValue(e.Instance, out var port)) session.AttachProposals(port);
             _sessions[e.Instance] = session;
         }
         return session.Handle(e, NextRev());

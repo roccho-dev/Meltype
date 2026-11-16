@@ -42,7 +42,9 @@ public sealed record CompositionView(
     string? Committed = null,
     string? ContextHint = null,
     // 一覧に番号を出すか (数字キーで選べる変換中の候補だけ。SessionResult.ForFront が決める)
-    bool Numbered = false);
+    bool Numbered = false,
+    // Proposal の opaque な根拠 JSON。組み込み変換の CandidateNote と混ぜず、そのまま表示する。
+    IReadOnlyList<string>? ProposalEvidence = null);
 
 /// <summary>キーを 1 つ押した。Ch は入力する文字 (キーボード配列は OS 側で解決済み。文字を生まないキーなら null)。</summary>
 public readonly record struct KeyPress(int Vk, char? Ch, bool Shift, bool Control, bool Alt, bool Command, long TimeMs)
@@ -411,6 +413,12 @@ public sealed partial class CompositionController
 
     private void SelectCandidateAt(int index)
     {
+        if (!_converting && _proposalSession?.HasCandidates == true)
+        {
+            _proposalSession.SetSelected(index);
+            UpdateView();
+            return;
+        }
         // 入力中に出した候補 (設定「入力中も変換候補をいくつか表示」) をクリックしたら、変換を始めてからその候補を選ぶ
         // 入力中の候補は読み全体の候補なので、変換を始めて文節に分かれると一覧が変わり、番号が別の語を指す。
         // 見えていた一覧のまま、読み全体 1 つの文節にして、クリックした語を選ぶ
@@ -473,6 +481,7 @@ public sealed partial class CompositionController
     /// <summary>変換中の文節・候補・選択中の文節をすべて消す。再変換の状態も消す。</summary>
     private void ClearComposition()
     {
+        CancelProposals();
         _reconversion = null;
         _text.Clear();
         _converting = false;

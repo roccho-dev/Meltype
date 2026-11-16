@@ -96,6 +96,12 @@ internal sealed class KeyboardFront : IImeEnvironment, IDisposable
     /// <summary>入力モードが変わった (UI スレッドで呼ぶ)。</summary>
     public event Action? ModeChanged;
 
+    /// <summary>既存のキーボード入力欄だけに Proposal を接続する。TSF の別入力欄とは共有しない。</summary>
+    public void AttachProposals(IProposalPort? port) => _host.AttachProposals(Instance, port);
+
+    /// <summary>HTTP の候補が届いたら、入力を追加せず現在の表示を読み直す。</summary>
+    public void RefreshProposals() => Send(ImeEventType.StateRequested);
+
     /// <summary>前面のアプリの Windows の IME の状態 (ログの画面に出す)。</summary>
     public WindowsIme.ImeState? SystemImeState { get; private set; }
 

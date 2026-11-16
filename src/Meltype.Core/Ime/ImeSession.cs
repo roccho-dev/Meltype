@@ -46,6 +46,10 @@ internal sealed class ImeSession
 
     public bool IsComposing => _session.IsComposing;
 
+    internal void AttachProposals(IProposalPort? port) => _session.AttachProposals(port);
+
+    internal SessionResult ProposalView() => _session.ProposalView();
+
     public void Close() => _session.CommitPending();
 
     /// <summary>

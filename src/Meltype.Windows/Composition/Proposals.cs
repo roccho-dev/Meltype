@@ -109,18 +109,20 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     private readonly Control _invoker;
     private readonly Uri _endpoint;
     private readonly Func<ProposalTarget?> _currentTarget;
+    private readonly Action? _updated;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly ProposalTargetLease _target = new();
     private ProposalPendingRequest? _pending;
 
-    private ProposalHttpPort(Control invoker, Uri endpoint, Func<ProposalTarget?> currentTarget)
+    private ProposalHttpPort(Control invoker, Uri endpoint, Func<ProposalTarget?> currentTarget, Action? updated)
     {
         _invoker = invoker;
         _endpoint = endpoint;
         _currentTarget = currentTarget;
+        _updated = updated;
     }
 
-    public static ProposalHttpPort? FromEnvironment(Control invoker, Func<ProposalTarget?> currentTarget)
+    public static ProposalHttpPort? FromEnvironment(Control invoker, Func<ProposalTarget?> currentTarget, Action? updated = null)
     {
         var value = Environment.GetEnvironmentVariable(EndpointVariable);
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -131,13 +133,13 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
             Diagnostics.Log.Warn($"{EndpointVariable} が同じ PC (localhost) の http(s) URL ではないため Proposal を無効にします。");
             return null;
         }
-        return new ProposalHttpPort(invoker, endpoint, currentTarget);
+        return new ProposalHttpPort(invoker, endpoint, currentTarget, updated);
     }
 
     /// <summary>トレイが起動時に呼ぶ。使える送り先があるときだけ attach に渡す (無ければ何も付けず null、従来どおり)。</summary>
-    public static ProposalHttpPort? AttachFromEnvironment(Action<IProposalPort> attach, Control invoker, Func<ProposalTarget?> currentTarget)
+    public static ProposalHttpPort? AttachFromEnvironment(Action<IProposalPort> attach, Control invoker, Func<ProposalTarget?> currentTarget, Action? updated = null)
     {
-        var port = FromEnvironment(invoker, currentTarget);
+        var port = FromEnvironment(invoker, currentTarget, updated);
         if (port is not null) attach(port);
         return port;
     }
@@ -258,6 +260,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
             if (pending.IsCancelled) return;
             _target.Complete(query.Generation, response);
             receive(response);
+            _updated?.Invoke();
         });
     }
 

@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Text.Json;
 using Meltype.Composition;
 using Meltype.Input;
+using Meltype.Config;
+using Meltype.Ime;
 
 namespace Meltype.Tests;
 
@@ -264,5 +266,119 @@ internal static class ProposalTests
         Assert.Equal("う", keyboard.Host.View?.Text, "portなしでは従来のnative表示");
         Assert.True(keyboard.Host.View?.Converting == false, "portなしで候補modeへ入らない");
         Assert.Equal(0, keyboard.Host.View?.Candidates.Count ?? 0, "portなしでProposal候補を作らない");
+    }
+
+    private sealed class Environment : IImeEnvironment
+    {
+        public InputMode? InputMethod => null;
+        public SnippetStore Snippets { get; } = new(null);
+        public string? ClipboardText => null;
+        public MeltypeSession CreateSession(Func<Settings> settings) =>
+            new(CompositionTests.Detector, new CompositionTests.FakeConverter(), new CompositionServices(), settings);
+    }
+
+    private static ImeOutput Key(ImeHost host, string instance, int vk, int ch = 0) =>
+        host.Handle(new ImeEvent
+        {
+            Version = ImeHost.Version, Type = ImeEventType.KeyPressed, Instance = instance,
+            Key = new ImeKey { Vk = vk, Ch = ch }, Field = new ImeField { CanRemove = false },
+        });
+
+    [Test]
+    private static void ImeHostPortBeforeFirstCharacterKeepsEvidenceAndAppliesOnce()
+    {
+        var host = new ImeHost(new Environment(), () => new Settings { LiveConversion = false });
+        var port = new FakePort();
+        host.AttachProposals("tty", port);
+        Key(host, "tty", 'U', 'u');
+        var query = port.Requests.Single();
+        port.Reply(query, Candidate("one", "同じ表示", "{\"kind\":\"text\",\"value\":\"A\"}", "{\"why\":\"A\"}"),
+            Candidate("two", "同じ表示", "{\"kind\":\"text\",\"value\":\"B\"}", "{\"why\":\"B\"}"));
+        var snapshot = host.ProposalView("tty");
+        Assert.Equal(0, snapshot.Commits.Count, "非同期応答の表示では確定を再送しない");
+        using var json = JsonDocument.Parse(snapshot.ToJson());
+        var list = json.RootElement.GetProperty("view").GetProperty("candidates");
+        Assert.Equal("{\"why\":\"A\"}", list.GetProperty("notes")[0].GetString(), "根拠は同じ候補番号で表示する");
+        Key(host, "tty", VirtualKeys.Down);
+        var selected = Key(host, "tty", VirtualKeys.Return);
+        Assert.Equal("同じ表示", selected.Result.Commits.Single().Text, "新しい ImeHost handle でも選択を確定する");
+        Assert.Equal("two", port.Selections.Single().Candidate.Id, "元候補の ID を保持する");
+        Assert.Equal(0, host.ProposalView("tty").Commits.Count, "確定後の表示取得にも二重作用がない");
+    }
+
+    [Test]
+    private static void ImeHostDoesNotShareQueriesAcrossInstancesOrDetachReplacementPort()
+    {
+        var host = new ImeHost(new Environment(), () => new Settings { LiveConversion = false });
+        var old = new FakePort();
+        var current = new FakePort();
+        host.AttachProposals("tty", old);
+        host.AttachProposals("tty", current);
+        host.DetachProposals("tty", old);
+        Key(host, "other", 'U', 'u');
+        Assert.Equal(0, current.Requests.Count, "別の入力欄の raw を transport に送らない");
+        Key(host, "tty", 'U', 'u');
+        Assert.Equal(1, current.Requests.Count, "古い bridge の解放は置換後の port を外さない");
+        Assert.Equal(0, old.Requests.Count, "置換した port へ送らない");
+    }
+
+    [Test]
+    private static void ImeHostDestroyInvalidatesInflightResponseBeforeInstanceRecreation()
+    {
+        var host = new ImeHost(new Environment(), () => new Settings { LiveConversion = false });
+        var port = new FakePort();
+        host.AttachProposals("tty", port);
+        Key(host, "tty", 'U', 'u');
+        var query = port.Requests.Single();
+        host.Handle(new ImeEvent { Version = ImeHost.Version, Type = ImeEventType.InstanceDestroyed, Instance = "tty" });
+        port.Reply(query, Candidate("late", "古い入力欄の応答", "{\"kind\":\"text\"}", "{}"));
+        Key(host, "tty", 'U', 'u');
+        Assert.Equal(1, port.Requests.Count, "閉じた欄の port を再生成した欄に持ち越さない");
+        Assert.True(host.ProposalView("tty").View?.ProposalEvidence is null, "同じ raw に戻っても古い候補を復活させない");
+        Assert.True(port.Cancelled.Contains(query.Generation), "入力欄を閉じたら未完の応答を取り消す");
+    }
+
+    [Test]
+    private static void SingleProposalIsVisibleWithoutUnsupportedNumberShortcuts()
+    {
+        var host = new ImeHost(new Environment(), () => new Settings { LiveConversion = false, NumberKeysSelectCandidates = true });
+        var port = new FakePort();
+        host.AttachProposals("tty", port);
+        Key(host, "tty", 'U', 'u');
+        port.Reply(port.Requests.Single(), Candidate("one", "候補", "{\"kind\":\"text\"}", "{}"));
+        using var json = JsonDocument.Parse(host.ProposalView("tty").ToJson());
+        var list = json.RootElement.GetProperty("view").GetProperty("candidates");
+        Assert.Equal("候補", list.GetProperty("items")[0].GetString(), "通常変換と違い、候補が1件でも選択の前に表示する");
+        Assert.True(!list.GetProperty("numbered").GetBoolean(), "Proposal が受け持たない数字キーの案内を出さない");
+    }
+
+    [Test]
+    private static void ProposalRepresentationIsNotRewrittenByPunctuationSettings()
+    {
+        var keyboard = new CompositionTests.Keyboard();
+        keyboard.Settings.Punctuation = PunctuationStyle.FullWidthCommaPeriod;
+        var port = new FakePort();
+        keyboard.Controller.AttachProposals(port);
+        keyboard.Type("u");
+        port.Reply(port.Requests.Single(), Candidate("literal", "、。", "{\"kind\":\"text\"}", "{}"));
+        Assert.Equal("、。", keyboard.Host.View?.Candidates.Single(), "外部候補の表示を元の representation と一致させる");
+        keyboard.Press(VirtualKeys.Return);
+        Assert.Equal("、。", keyboard.Host.Document, "確定でも設定の句読点に書き換えない");
+        Assert.Equal("、。", port.Selections.Single().Candidate.Representation, "元の候補 identity と作用を一致させる");
+    }
+
+    [Test]
+    private static void CommitRequestedCancelsAnUnansweredQueryWithoutWaitingForAnotherKey()
+    {
+        var host = new ImeHost(new Environment(), () => new Settings { LiveConversion = false });
+        var port = new FakePort();
+        host.AttachProposals("tty", port);
+        Key(host, "tty", 'U', 'u');
+        var query = port.Requests.Single();
+        host.Handle(new ImeEvent { Version = ImeHost.Version, Type = ImeEventType.CommitRequested, Instance = "tty" });
+        Assert.True(port.Cancelled.Contains(query.Generation), "pass-through のための確定でも未送信・未応答の query をその場で取り消す");
+        port.Reply(query, Candidate("late", "追加してはいけない", "{\"kind\":\"text\"}", "{}"));
+        Assert.True(host.ProposalView("tty").View is null, "確定した入力を遅い応答で再表示しない");
+        Assert.Equal(0, host.ProposalView("tty").Commits.Count, "確定文字を再送しない");
     }
 }

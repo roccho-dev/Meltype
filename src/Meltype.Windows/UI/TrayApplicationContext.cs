@@ -33,6 +33,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     // 更新前の Meltype IME が残っているアプリ (TipServer.ClientOutdated)
     private readonly HashSet<string> _outdatedApps = new(StringComparer.OrdinalIgnoreCase);
     private readonly Keyboard.KeyboardFront _keyboard;
+    private readonly Composition.ProposalHttpPort? _proposals;
     private readonly ToolStripMenuItem _tsfModeItem;
     private SettingsForm? _settingsForm;
     private LogForm? _logForm;
@@ -56,6 +57,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // 入力・表示は、動かしている設定 (Meltype IME を使えなければ Meltype キーボード) を読む
         _composition = new Composition.CompositionService(_invoker, _engine.Runtime, () => _engine.Running);
         _keyboard = new Keyboard.KeyboardFront(_invoker, _composition, environment => new Ime.ImeHost(environment, () => _engine.Running));
+        _proposals = Composition.ProposalHttpPort.AttachFromEnvironment(_keyboard.AttachProposals, _invoker,
+            () => Composition.ProposalTarget.Capture(_composition.Focus), _keyboard.RefreshProposals);
         _keyboard.ModeChanged += OnKeyboardModeChanged;
         _engine.Keyboard = _keyboard;
         _engine.Focus = _composition.Focus;
@@ -827,6 +830,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _engine.SettingsChanged -= OnEngineSettingsChanged;
         _engine.ToggleRequested -= OnToggleRequested;
         _tipServer.Dispose();
+        _keyboard.AttachProposals(null);
+        _proposals?.Dispose();
         _engine.Keyboard = null;
         _keyboard.Dispose();
         Composition.LearningSaves.FlushAll();
