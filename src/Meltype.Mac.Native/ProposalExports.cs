@@ -172,7 +172,8 @@ public static unsafe class ProposalExports
     {
         if (Get(handle) is not { } exchange || exchange.Pending is not { } query) return null;
         exchange.Pending = null;
-        return Text(Json(w => {
+        return Text(Json(w =>
+        {
             w.WriteStartObject(); w.WriteNumber("generation", query.Generation);
             w.WriteString("raw", query.Raw); w.WriteEndObject();
         }));
@@ -196,7 +197,8 @@ public static unsafe class ProposalExports
     {
         if (Get(handle) is not { } exchange || exchange.Selection is not { } selection) return null;
         exchange.Selection = null;
-        return Text(Json(w => {
+        return Text(Json(w =>
+        {
             w.WriteStartObject(); w.WriteNumber("generation", selection.Generation); w.WriteString("raw", selection.Raw);
             w.WritePropertyName("proposal"); w.WriteStartObject();
             w.WriteString("id", selection.Candidate.Id); w.WriteString("representation", selection.Candidate.Representation);
