@@ -40,6 +40,16 @@ internal static class SelfTest
             Directory.CreateDirectory(Config.AppPaths.DataDirectory);
             return Config.AppPaths.DataDirectory;
         });
+        Check("ポータブル版の更新経路", () =>
+        {
+            if (!Config.AppPaths.IsPortable) return "通常版の更新経路";
+            // 配布側の検査では、別の通常版が準備した有効な更新状態も置く。起動時・手動のどちらも使わない。
+            if (Updater.Staged(allowPrerelease: true) is not null || Updater.Apply(allowPrerelease: true) ||
+                Updater.ApplyStagedAtStartup(() => true, allowPrerelease: true))
+                throw new InvalidOperationException("ポータブル版で通常版の更新を実行できる");
+            using var updater = new Updater(() => true, () => true);
+            return updater.CheckNowAsync().GetAwaiter().GetResult();
+        });
         Check("設定", () => new Config.Settings().Clone().Normalize().Mode.ToString());
         Check("設定の保存と読み込み", () =>
         {

@@ -51,13 +51,15 @@ internal sealed class Updater : IDisposable
     /// </summary>
     public static (string Version, string Folder)? Staged(bool allowPrerelease)
     {
+        // 配布物を管理する側が更新するポータブル版では、以前の通常版が残した更新も実行しない。
+        if (Config.AppPaths.IsPortable) return null;
         try
         {
             if (!File.Exists(ReadyFile)) return null;
-            var parts = File.ReadAllText(ReadyFile).Trim().Split('\t');
-            if (parts.Length != 2 || !IsNewer(parts[0]) || !File.Exists(Path.Combine(parts[1], "install.ps1"))) return null;
-            if (Config.ProjectInfo.IsPrerelease(parts[0]) && !allowPrerelease) return null;
-            return (parts[0], parts[1]);
+            if (ParseReady(File.ReadAllText(ReadyFile), AppInfo.UpdateRepository) is not { } ready) return null;
+            if (!IsNewer(ready.Version) || !File.Exists(Path.Combine(ready.Folder, "install.ps1"))) return null;
+            if (Config.ProjectInfo.IsPrerelease(ready.Version) && !allowPrerelease) return null;
+            return ready;
         }
         catch (Exception ex)
         {
@@ -66,12 +68,22 @@ internal sealed class Updater : IDisposable
         }
     }
 
+    /// <summary>取得元がこの fork と一致する更新だけを使う。取得元の無い旧形式も使わない。</summary>
+    internal static (string Version, string Folder)? ParseReady(string text, string repository)
+    {
+        var parts = text.Trim().Split('\t');
+        if (parts.Length != 3 || parts[0].Length == 0 || parts[1].Length == 0 || !string.Equals(parts[2], repository, StringComparison.Ordinal)) return null;
+        return (parts[0], parts[1]);
+    }
+
     /// <summary>
     /// 起動時: ダウンロード済みの新しい版があればインストールを始める (true なら Meltype はそのまま終了する。install.ps1 が新しい版を起動する)。
     /// 前回インストールに失敗していた (同じ版のまま起動した) ときは、繰り返さない。
     /// </summary>
     public static bool ApplyStagedAtStartup(Func<bool> enabled, bool allowPrerelease, Func<string, bool>? confirm = null)
     {
+        // 通常版の更新journalも触らない。読み取り専用の配布treeから別の通常版へ移るのを防ぐ。
+        if (Config.AppPaths.IsPortable) return false;
         try
         {
             if (File.Exists(ApplyingFile))
@@ -174,7 +186,9 @@ internal sealed class Updater : IDisposable
     }
 
     /// <summary>今すぐ確認する (トレイの「更新を確認」)。結果は Ready か戻り値の文言で返す。</summary>
-    public Task<string> CheckNowAsync() => AppInfo.IsPublicRelease
+    public Task<string> CheckNowAsync() => Config.AppPaths.IsPortable
+        ? Task.FromResult("ポータブル版は配布元から更新してください。")
+        : AppInfo.IsPublicRelease
         ? Task.Run(() => Run() ?? "更新を確認できませんでした。")
         : Task.FromResult($"Meltype {AppInfo.Version} はテスト版です。自動更新は公開版 (1.0.0) から使えます。新しいテスト版は配布元から受け取ってください。");
 
@@ -188,7 +202,7 @@ internal sealed class Updater : IDisposable
     /// <summary>update.ps1 を実行する。戻り値は利用者に見せる結果。</summary>
     private string? Run()
     {
-        if (!File.Exists(Script) || AppInfo.Version == "?") return null;
+        if (Config.AppPaths.IsPortable || !File.Exists(Script) || AppInfo.Version == "?") return null;
         if (Interlocked.Exchange(ref _running, 1) == 1) return null;
         try
         {

@@ -132,6 +132,10 @@ powershell -ExecutionPolicy Bypass -File .\Build-Package.ps1 -Portable
 
 通常版と分けて `dist\Meltype-test-<日時>-windows-portable.zip` を作ります。リリースビルドでは版番号を含む `Meltype-<版>-windows-portable.zip` になります。ZIPをフォルダーごと展開し、その中の `Meltype.exe` を実行してください。アプリと.NETランタイムを同梱するため、.NET未導入のPCでも起動できます。ユーザーデータは `Meltype.exe` の隣の `data` に保存します。IME登録、自動起動、アプリ内更新は含めません。
 
+読み取り専用の配布 tree で使うときは、そのプロセスの `MELTYPE_DATA_DIR` を利用者専用の書き込み可能な保存先に設定します。通常版が残した更新状態もポータブル版からは実行しません。管理された配布へ渡す前に、Windows 上で `tools/Test-WindowsPortable.ps1 -Archive <ZIP> -Version <版>` を実行します。この検査は実行ファイルの版、保存先の上書き、既存の更新状態と配布 tree が変わらないことを実 ZIP で確かめます。実際の入力先での操作は、別途その対話 session で確かめます。
+
+この fork の候補検証と、同じ成果物を公開する手順は [docs/RELEASE.md](../RELEASE.md) にあります。
+
 ### ウイルス対策ソフトの検査
 
 GitHub Actions の配布ジョブは、公開する前に Microsoft Defender の定義を更新し、できたフォルダーと zip を検査します。検出・検査のエラー・Defender が無効のときは、公開を止めます。

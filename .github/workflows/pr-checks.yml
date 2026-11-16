@@ -1,0 +1,22 @@
+# fork 固有の候補配布・source固定の契約。コアの精度と辞書の検査は core.yml が担当する。
+name: fork-contracts
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Artifact, promotion and upstream-snapshot counterexamples
+        run: |
+          python3 -m unittest discover -s tools -p test_windows_portable.py -v
+          python3 -m unittest discover -s tools -p test_candidate_manifest.py -v
+          python3 -m unittest discover -s tools -p test_promotion_state.py -v
+          python3 -m unittest discover -s tools -p test_upstream_notice.py -v

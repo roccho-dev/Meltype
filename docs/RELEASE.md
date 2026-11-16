@@ -10,19 +10,20 @@
 
 この fork (roccho-dev/Meltype) は、GitHub のリリースの zip だけで配布します。インストーラー (setup.exe)・winget・Scoop・Homebrew には出しません。
 
-1. 版を上げる
-   - `src/Meltype/Meltype.csproj`・`src/Meltype.Core/Meltype.Core.csproj` の `<Version>`。版は数字 4 つ (`1.2.1.2` など。`System.Version` で比べられる形) にする
-   - `mac/Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` (Mac 版の表示の版は Info.plist から読みます)
-2. コミットして main に入れ、同じ版のタグを付けて push する: `git tag v1.2.1.2 && git push origin v1.2.1.2`
-3. GitHub Actions が Windows (fork-build.yml)・Mac (mac.yml)・Linux (fork-linux.yml) の配布物を作り、リリースに付ける
-   - Windows: `Meltype-<版>-windows.zip`。fork-build.yml は、タグの版とビルドした `Meltype.exe` の版 (ProductVersion) が違えば止まり、zip にビルドの出自の証明 (artifact attestation) を付けます
-   - Mac: `Meltype-<版>-mac.zip`、Linux: `Meltype-<版>-linux.zip` (どちらもプレビュー版)
-4. リリースのページにリリースノートを書く (プレリリースにはしない。自動更新は最新のリリース (latest) だけを見ます)
-5. 使っている人の Meltype (Windows) は、自動で新しい版に更新されます (この fork のリリースだけを見ます)
+1. `src/Meltype.Windows/Meltype.Windows.csproj`・`src/Meltype.Core/Meltype.Core.csproj` の版を数字 4 つ (`1.6.0.1` など) にそろえ、`docs/release-notes/<版>.md` を書く。
+2. PR でテストと候補成果物を検証する。`fork-build.yml` は通常版・ポータブル版の Windows ZIP、`fork-linux.yml` は Direct TTY を含む Linux ZIPを作る。PR からは公開しない。
+3. 公開する source commit を固定し、その commit で両方の workflow を手動実行する。成功した run と `meltype-windows-candidate` / `meltype-linux-candidate` の artifact ID、各 `*-candidate.json` の source・版・hashを確認する。Windows の候補では実 ZIP の portable 起動・保存先・残存する通常版更新からの分離も検査する。
+4. 検証した source commit に同じ版のタグを付ける。タグの push だけでは公開されない。
+5. `fork-publish.yml` の手動実行へ、タグ・source commit・両方の run ID / artifact ID を渡す。公開入口は同一sourceの成功した自repoの実行と、出自・版・hashを照合し、検証済みの同じ ZIP を再ビルドせずに使う。初期値は `prerelease=true`・`make_latest=false`。
+6. 正式版の latest へ進めるときは、その作用と利用先への影響を確認したうえで `prerelease=false`・`make_latest=true` を明示する。通常版の自動更新はこの fork の latest を見る。ポータブル版の更新は配布側が担当する。
+
+公開結果が不明なときは、そのタグの Release と asset の実 identity を先に読む。同じ操作の再実行や既存 asset の上書きで埋め合わせない。
+
+この候補昇格入口の対象は Windows / Linux。Mac の source と既存の Release は保持し、未検証の Mac 成果物を同じ候補の成功として扱わない。
 
 配布物の出自は `gh attestation verify <zip> --repo roccho-dev/Meltype` で確かめられます。
 
-upstream の `build.yml`・`linux.yml` は upstream の版のまま置き、この fork では Actions の設定で止めています (`gh workflow disable build.yml`、`gh workflow disable linux.yml`)。
+upstream の公開・管理 workflow にはこの fork で副作用を起こさない条件を置き、fork の候補検証・公開入口を使います。`.github/upstream-base.json` が選んだ上流 tag / commit を固定し、fork-surface の手動実行は最新 stable の観測を別に報告します。新しい版を観測しただけでは、選択済み source や成果物を置き換えません。
 
 <br>
 

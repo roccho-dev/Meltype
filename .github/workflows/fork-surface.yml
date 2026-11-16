@@ -12,6 +12,22 @@ permissions:
   contents: read
 
 jobs:
+  upstream-notice:
+    # 定期実行や自動取り込みは設定しない。今回固定したsnapshotと最新stableを別に報告する。
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Observe stable upstream without changing the selected snapshot
+        run: |
+          python3 tools/upstream_notice.py > upstream-observation.json
+          cat upstream-observation.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: upstream-observation
+          path: upstream-observation.json
   surface:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -23,8 +39,12 @@ jobs:
       - name: Upstream files are changed or deleted only as listed
         run: |
           set -euo pipefail
-          git fetch --quiet --no-tags https://github.com/yksr-melt/Meltype.git main
-          base="$(git merge-base HEAD FETCH_HEAD)"
+          mapfile -t pin < <(python3 -c 'import json,re; p=json.load(open(".github/upstream-base.json")); assert p["repository"] == "yksr-melt/Meltype" and re.fullmatch("[0-9a-f]{40}",p["commit"]); print(p["repository"]); print(p["commit"])')
+          test "${#pin[@]}" = 2
+          git fetch --quiet --no-tags "https://github.com/${pin[0]}.git" "${pin[1]}"
+          base="${pin[1]}"
+          test "$(git rev-parse FETCH_HEAD)" = "$base"
+          git merge-base --is-ancestor "$base" HEAD
           git -c core.quotepath=off diff --no-renames --name-only --diff-filter=MDT "$base" HEAD | LC_ALL=C sort > "$RUNNER_TEMP/surface"
           sed -e '/^#/d' -e '/^$/d' .github/fork-surface.txt | LC_ALL=C sort > "$RUNNER_TEMP/allowed"
           LC_ALL=C comm -23 "$RUNNER_TEMP/surface" "$RUNNER_TEMP/allowed" > "$RUNNER_TEMP/outside"

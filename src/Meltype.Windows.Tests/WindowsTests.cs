@@ -536,6 +536,15 @@ internal static class WindowsTests
         }
     }
     [Test]
+    public static void Updater_UsesOnlyUpdatesFromItsOwnRepository()
+    {
+        var ready = Updater.ParseReady("1.6.0.2\tC:\\staged\\Meltype\troccho-dev/Meltype", "roccho-dev/Meltype");
+        Assert.True(ready is { Version: "1.6.0.2", Folder: @"C:\staged\Meltype" }, "この fork の更新を読む");
+        Assert.Equal(null, Updater.ParseReady("1.6.0.2\tC:\\staged\\Meltype\tyksr-melt/Meltype", "roccho-dev/Meltype"), "upstream の更新を引き継がない");
+        Assert.Equal(null, Updater.ParseReady("1.6.0.2\tC:\\staged\\Meltype", "roccho-dev/Meltype"), "取得元の無い更新を使わない");
+    }
+
+    [Test]
     public static void Updater_StopsScriptThatDoesNotFinish()
     {
         static Process Start(string command)

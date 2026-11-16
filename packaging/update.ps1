@@ -2,10 +2,10 @@
 # Copyright (C) 2026 Yukishiro
 
 # Meltype の更新を確認して、新しい版があればダウンロードして展開しておく (Meltype が定期的に呼ぶ)。
-#   update.ps1 -Repository yksr-melt/Meltype -CurrentVersion 0.1.2 -Directory %LOCALAPPDATA%\Meltype\update [-Prerelease]
+#   update.ps1 -Repository roccho-dev/Meltype -CurrentVersion 1.6.0.1 -Directory %LOCALAPPDATA%\Meltype\update [-Prerelease]
 # -Prerelease を付けると、プレリリース版 (v1.3.1-pre.4 など) も含めて一番新しい版を見る (付けなければ正式版の最新だけ)。
 # GitHub の最新のリリースに Windows 版の zip (Meltype-<版>-windows.zip、前の名前は Meltype-test-*.zip) があり、版 (タグ v0.1.3) が今の版より新しければ、
-# <Directory>\<版> に展開し、<Directory>\ready.txt に「版 TAB 展開した場所」を書く。インストールは Meltype が install.ps1 を呼んで行う。
+# <Directory>\<版> に展開し、ready.txt に「版 TAB 展開した場所 TAB 取得元repo」を書く。この fork の取得元だけを使う。
 # 結果は標準出力に 1 行で返す: none (更新なし) / ready <版> / error <理由>
 
 param(
@@ -64,21 +64,20 @@ try {
 
     $asset = @($release.assets | Where-Object { $_.name -like 'Meltype-*-windows.zip' -and $_.name -notlike '*-windows-portable.zip' }) + @($release.assets | Where-Object { $_.name -like 'Meltype-test-*.zip' }) | Select-Object -First 1
     if (-not $asset) { Write-Output "error リリース $latest に zip がありません"; exit 0 }
+    if ($asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { Write-Output "error リリース $latest の zip に SHA-256 がありません"; exit 0 }
 
     $target = Join-Path $Directory $latest
     $ready = Join-Path $Directory 'ready.txt'
-    if ((Test-Path -LiteralPath $ready) -and ((Get-Content -LiteralPath $ready -Raw) -like "$latest`t*")) { Write-Output "ready $latest"; exit 0 }
+    if ((Test-Path -LiteralPath $ready) -and ("$(Get-Content -LiteralPath $ready -Raw)".Trim() -ceq "$latest`t$target`t$Repository")) { Write-Output "ready $latest"; exit 0 }
 
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
     $zip = Join-Path $Directory $asset.name
     Invoke-WebRequest -Uri $asset.browser_download_url -Headers @{ 'User-Agent' = 'Meltype-Updater' } -OutFile $zip -UseBasicParsing -TimeoutSec 600
 
     # GitHub が公開している SHA-256 と同じか (ダウンロードの途中で壊れていないか) を確かめる。
-    if ($asset.digest -like 'sha256:*') {
-        $expected = $asset.digest.Substring(7).ToLowerInvariant()
-        $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) { Remove-Item -LiteralPath $zip -Force; Write-Output 'error ダウンロードした zip のハッシュが違います'; exit 0 }
-    }
+    $expected = $asset.digest.Substring(7).ToLowerInvariant()
+    $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) { Remove-Item -LiteralPath $zip -Force; Write-Output 'error ダウンロードした zip のハッシュが違います'; exit 0 }
 
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
     Expand-Archive -LiteralPath $zip -DestinationPath $target -Force
@@ -87,7 +86,7 @@ try {
 
     # 古い版の展開先を片付ける
     Get-ChildItem -LiteralPath $Directory -Directory | Where-Object { $_.Name -ne $latest } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    [IO.File]::WriteAllText($ready, "$latest`t$target", (New-Object Text.UTF8Encoding $false))
+    [IO.File]::WriteAllText($ready, "$latest`t$target`t$Repository", (New-Object Text.UTF8Encoding $false))
     Write-Output "ready $latest"
 }
 catch {
