@@ -145,10 +145,17 @@ class BridgeTests(unittest.TestCase):
             c = t / "stub.c"
             c.write_text(r'''#include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 int meltype_init(const char* directory, const void* check) { (void)directory; (void)check; return 1; }
 void* meltype_ime_create(void) { return malloc(1); }
 void meltype_ime_destroy(void* p) { free(p); }
 void meltype_free(void* p) { free(p); }
+void meltype_shutdown(void) {
+  const char* marker = getenv("MELTYPE_TEST_SHUTDOWN_MARKER");
+  if (!marker) return;
+  FILE* file = fopen(marker, "a");
+  if (file) { fputs("shutdown\n", file); fclose(file); }
+}
 void* meltype_ime_handle(void* p, const char* event) {
   (void)p;
   if (!strstr(event, "\"canRemove\": false") || !strstr(event, "\"instance\": \"tty\"")) return NULL;
@@ -164,6 +171,22 @@ void* meltype_ime_handle(void* p, const char* event) {
                 self.assertEqual(app.InputBridge(native).feed(b"n"), "日本語".encode())
             finally:
                 native.close()
+            marker = t / "shutdown.txt"
+            # Two closed hosts and a later new host share the process runtime.
+            # Only process exit may flush learning/stop the conversion servers.
+            probe = """import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from meltype_tty import NativeSession
+for _ in range(3):
+    native = NativeSession(Path(sys.argv[2]), Path(sys.argv[3]))
+    native.close()
+    assert not Path(sys.argv[4]).exists(), 'session close shut down the shared runtime'
+"""
+            environment = {**os.environ, "MELTYPE_TEST_SHUTDOWN_MARKER": str(marker)}
+            subprocess.run([__import__('sys').executable, "-c", probe, str(SCRIPT.parent), str(so), str(mozc), str(marker)],
+                           env=environment, check=True)
+            self.assertEqual(marker.read_text(), "shutdown\n")
 
     def test_host_candidate_selection_and_meaning_reach_the_existing_panel(self):
         wire = {"consumed": True, "commits": [], "view": {"text": "日本語", "candidates": {

@@ -11,6 +11,7 @@ Unsupported edits stop before writing to the child. Use only in a disposable PTY
 """
 
 import argparse
+import atexit
 import ctypes
 import fcntl
 import json
@@ -37,6 +38,9 @@ class UnsafeEffect(RuntimeError):
 class NativeSession:
     """TTY transport for the same ImeHost event protocol as Linux IBus/fcitx5."""
 
+    _shutdown_libraries = set()
+    _shutdown_lock = threading.Lock()
+
     def __init__(self, library: Path, mozc: Path, proposal_url=None):
         if not library.is_file() or not mozc.is_file():
             raise FileNotFoundError("MeltypeNative.so and Mozc helper must both exist")
@@ -55,6 +59,16 @@ class NativeSession:
             raise UnsafeEffect("--mozc must name the package's mozc/meltype_mozc_helper")
         if self.lib.meltype_init(os.fsencode(mozc.parent.parent), None) != 1:
             raise UnsafeEffect("Meltype Mozc could not initialize")
+        # ImeHost handles can coexist, and native Shutdown is process-wide and
+        # one-shot. Closing a preview or one PTY must not stop another session.
+        # Keep the library loaded until its single process-exit callback runs.
+        with self._shutdown_lock:
+            library_key = str(library.resolve())
+            if library_key not in self._shutdown_libraries:
+                self.lib.meltype_shutdown.argtypes = []
+                self.lib.meltype_shutdown.restype = None
+                atexit.register(self.lib.meltype_shutdown)
+                self._shutdown_libraries.add(library_key)
         self.session = self.lib.meltype_ime_create()
         if not self.session:
             raise UnsafeEffect("Meltype native session unavailable")
