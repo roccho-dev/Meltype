@@ -45,3 +45,36 @@ Windows は `Build-Package.ps1` が、入っている最新の 10.0 のランタ
 - Settings → Security → **Private vulnerability reporting** を ON にする ([SECURITY.md](../SECURITY.md) の報告先)
 - Settings → General → Features → **Issues** を ON にする (アプリの「不具合の報告・提案...」はこの fork の Issue を開きます)
 - Settings → Branches → main のブランチ保護で、必須のチェックに **build**・**精度の比較**・**辞書の形式** を入れる
+
+## 設定・学習データを保って版を戻す
+
+実行ファイルの版戻しと、データを古い時点へ戻す操作は分ける。1.2.1.11 の設定は version 5、1.6.0 系は version 10 で、旧版の設定保存は新版で増えた項目を残さない。旧版と新版が同じデータフォルダーへ交互に書いても、設定が完全に往復するとは扱わない。
+
+最低限の戻し方は、現在のデータを保持し、旧版を別のコピーで動かす形にする。
+
+1. 現在の版・成果物 SHA-256・実際のデータ保存先を記録する。アプリと変換ヘルパーを止め、最後の書き込みを終わらせる。
+2. **更新後の現在の**データフォルダー全体を、新しい保存先 `post-upgrade` へコピーする。更新前の checkpoint とは別に残し、このコピーをアプリの書き込み先にしない。
+3. `post-upgrade` を、存在しない別の保存先 `rollback-working` へコピーする。検証済みの旧版は `MELTYPE_DATA_DIR` をこの保存先に指定して動かす。Windows ではその起動プロセスの環境変数、Linux ではそのコマンドの環境変数にする。更新を基盤が管理する端末では、旧版のアプリ内更新で別の版へ移らない既存の管理経路を使う。
+4. 旧版で増えた辞書・学習は `rollback-working` に残る。新版へ戻すときは、これを新しい `resume-working` へコピーし、その `config.json` も別名で保存する。更新前の checkpoint をデータ全体に上書きしない。
+5. 設定は、保管した `post-upgrade/config.json` と旧版で保存した設定を比較する。旧版で好みを変えていなければ、新版の設定を `resume-working/config.json` に使える。旧版で変えた好みがあれば、新版の設定画面で明示的に選び直す。未知の項目を自動でマージしない。辞書・学習は、旧版で増えた内容を持つ working copy を使う。
+6. 新版を `resume-working` で開き、設定・登録語・学習と、その環境の実際の入力操作を確かめてから、採用するデータ保存先を決める。保管した二つの設定とデータは、この確認の前に消さない。
+
+`MELTYPE_DATA_DIR` は 1.2.1.11 と 1.6.0 系で共通の保存先指定で、通常版とポータブル版の既定の場所より優先する。この手順だけで、端末の起動登録・IME 登録や Sandbox の表示 desktop が復旧したとは扱わない。それぞれの配信側で確認する。
+
+### 隔離した旧版・新版の実データ検査
+
+旧版と候補の checkout を指定し、実際の Core assembly で設定・ユーザー辞書・英日判定の学習を保存し直す。使うデータは検査専用の新しいフォルダーだけで、実ユーザーの保存先へは接続しない。
+
+```sh
+python3 tools/check-data-roundtrip.py \
+  --baseline /absolute/path/to/Meltype-1.2.1.11 \
+  --candidate /absolute/path/to/candidate \
+  --dotnet /absolute/path/to/dotnet \
+  --output /absolute/path/to/new-evidence-directory
+```
+
+出力の `report.json` は、source commit・変更差分と assembly の SHA-256、各段階のデータ SHA-256 を記録する。旧版による新版設定の項目消失を実際に再現し、別コピーでの版戻し後に、更新後の設定と版戻し中に増えた辞書・学習を保持できることを別に確かめる。これは旧版の設定編集を自動で引き継ぐ機構や、変換エンジン固有の全データ形式の互換保証ではない。
+
+### source の再取得
+
+採用した source ref は `git bundle create <新しい保存先.bundle> <採用ref>` で履歴ごと保管し、元 checkout に接続しない場所へその bundle から clone する。元と復元先の commit・tree を照合し、復元先から必要な build と入力検査を行う。source の復元と、実行時の成果物・設定・認証・端末状態の復旧はそれぞれ記録する。bundle を作っただけで旧 resources の削除準備が完了したとは扱わない。
