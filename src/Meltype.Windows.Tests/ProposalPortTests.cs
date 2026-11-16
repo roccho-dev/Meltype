@@ -60,4 +60,34 @@ internal static class ProposalPortTests
         using var port = Attach("http://127.0.0.1:8765/proposals");
         Assert.True(port is not null && attached.Count == 1 && ReferenceEquals(attached[0], port), "使える送り先なら、その口を 1 回だけ付ける");
     }
+
+    [Test]
+    public static void CompletedResponseIsDeliveredButDisposedPortDropsQueuedCallback()
+    {
+        Invoker.CreateControl();
+        var deliver = typeof(Composition.ProposalHttpPort).GetMethod("Deliver", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var query = new Composition.ProposalQuery(1, "u");
+        var response = new Composition.ProposalResponse(1, "u", []);
+        var delivered = 0;
+        Action<Composition.ProposalResponse> receive = _ => delivered++;
+
+        using (var live = From("http://127.0.0.1:8765/proposals")!)
+        using (var pending = new Composition.ProposalPendingRequest())
+        {
+            deliver.Invoke(live, [query, receive, pending, response]);
+            pending.Complete();
+            Application.DoEvents();
+            Assert.Equal(1, delivered, "HTTP の完了による CTS 解放は、キューにある正常応答を取り消さない");
+        }
+
+        using (var closed = From("http://127.0.0.1:8765/proposals")!)
+        using (var pending = new Composition.ProposalPendingRequest())
+        {
+            deliver.Invoke(closed, [query, receive, pending, response]);
+            pending.Complete();
+            closed.Dispose();
+            Application.DoEvents();
+            Assert.Equal(1, delivered, "既に HTTP が完了していても、port 解放後の応答は入力先へ渡さない");
+        }
+    }
 }

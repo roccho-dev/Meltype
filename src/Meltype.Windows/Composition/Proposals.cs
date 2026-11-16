@@ -117,6 +117,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly ProposalTargetLease _target = new();
     private ProposalPendingRequest? _pending;
+    private int _disposed;
 
     private ProposalHttpPort(Control invoker, Uri endpoint, Func<ProposalTarget?> currentTarget, Action? updated)
     {
@@ -258,10 +259,10 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 
     private void Deliver(ProposalQuery query, Action<ProposalResponse> receive, ProposalPendingRequest pending, ProposalResponse response)
     {
-        if (pending.IsCancelled || !_invoker.IsHandleCreated || _invoker.IsDisposed) return;
+        if (Volatile.Read(ref _disposed) != 0 || pending.IsCancelled || !_invoker.IsHandleCreated || _invoker.IsDisposed) return;
         _invoker.BeginInvoke(() =>
         {
-            if (pending.IsCancelled) return;
+            if (Volatile.Read(ref _disposed) != 0 || pending.IsCancelled) return;
             _target.Complete(query.Generation, response);
             receive(response);
             _updated?.Invoke();
@@ -282,6 +283,7 @@ internal sealed class ProposalHttpPort : IProposalPort, IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         CancelPending();
         _target.Clear();
         _http.Dispose();
