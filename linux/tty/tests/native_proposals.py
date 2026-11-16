@@ -275,7 +275,13 @@ if __name__=='__main__':
         with tempfile.TemporaryDirectory(prefix='meltype-native-proposals-') as home:
             for key in ['HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']:
                 os.environ[key]=str(Path(home)/key.lower());Path(os.environ[key]).mkdir()
-            result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProposalProof(case)]))
+            try:
+                result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProposalProof(case)]))
+            finally:
+                # Close the process runtime while its isolated data directory
+                # still exists; atexit remains the fallback for abrupt errors.
+                shutdown=ctypes.CDLL(str(PACKAGE/'libMeltypeNative.so')).meltype_shutdown
+                shutdown.argtypes=[]; shutdown.restype=None; shutdown()
             sys.exit(0 if result.wasSuccessful() else 1)
     failures=[]
     for case in names:

@@ -5,6 +5,7 @@
 Usage: python3 tty/tests/native_tty.py /absolute/Meltype-linux
 Missing real artifacts fail; they are not skipped or replaced with test doubles.
 """
+import ctypes
 import hashlib
 import json
 import os
@@ -359,7 +360,13 @@ if __name__=='__main__':
             for key in ['HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']:
                 os.environ[key]=str(Path(home)/key.lower())
                 Path(os.environ[key]).mkdir()
-            result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProof(case)]))
+            try:
+                result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProof(case)]))
+            finally:
+                # Converter warmup/learning owns files in this data scope. Stop
+                # the process runtime before TemporaryDirectory removes them.
+                shutdown=ctypes.CDLL(str(LIBRARY)).meltype_shutdown
+                shutdown.argtypes=[]; shutdown.restype=None; shutdown()
             sys.exit(0 if result.wasSuccessful() else 1)
     started=time.monotonic()
     failures=[]
