@@ -134,7 +134,7 @@ zip を展開したフォルダーの `Uninstall.cmd` でも消せます。ど�
 
 <br><br>
 
-<img src="docs/images/headings/start.svg" alt="使い始める" width="480"><br>
+## 使い始める
 
 あとは、いつもどおりローマ字で打つだけ！
 
@@ -154,7 +154,7 @@ zip を展開したフォルダーの `Uninstall.cmd` でも消せます。ど�
 
 <br><br>
 
-<img src="docs/images/headings/faq.svg" alt="よくある質問" width="480"><br>
+## よくある質問
 
 <details>
 <summary>タスクバーの IME の表示がずっと「A」のまま</summary>
@@ -317,8 +317,8 @@ General Public License for more details.
 </p>
 
 - 送り方 → [CONTRIBUTING.md](CONTRIBUTING.md)
-- ビルド・仕組み → [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-- Mac の CLI ビルド → [docs/MAC-CLI.md](docs/MAC-CLI.md)、WSL / Linux の CLI ビルド → [docs/WSL.md](docs/WSL.md)
+- ビルド・仕組み → [docs/dev/DEVELOPMENT.md](docs/dev/DEVELOPMENT.md)
+- Mac の CLI ビルド → [mac/README.md](mac/README.md)、WSL / Linux の CLI ビルド → [linux/README.md](linux/README.md)
 
 <br><br>
 

@@ -1,11 +1,11 @@
 <a name="リリースの手順"></a>
-<img src="images/headings/release/title.svg" alt="リリースの手順" height="80">
+# リリースの手順
 
 
 <br>
 
 <a name="版を出す"></a>
-<img src="images/headings/release/01.svg" alt="版を出す" height="53"><br>
+## 版を出す
 
 
 この fork (roccho-dev/Meltype) は、GitHub のリリースの zip だけで配布します。インストーラー (setup.exe)・winget・Scoop・Homebrew には出しません。
@@ -28,7 +28,7 @@ upstream の公開・管理 workflow にはこの fork で副作用を起こさ�
 <br>
 
 <a name="同梱の-net-の更新"></a>
-<img src="images/headings/release/02.svg" alt="同梱の .NET の更新" height="53"><br>
+## 同梱の .NET の更新
 
 
 配布物の .NET の版は、どこにも固定していません。ビルドのたびに setup-dotnet (`10.0.x`) がその時の最新の SDK とランタイムを入れます。
@@ -39,7 +39,7 @@ Windows は `Build-Package.ps1` が、入っている最新の 10.0 のランタ
 <br>
 
 <a name="github-の設定"></a>
-<img src="images/headings/release/03.svg" alt="GitHub の設定" height="53"><br>
+## GitHub の設定
 
 
 - Settings → Security → **Private vulnerability reporting** を ON にする ([SECURITY.md](../SECURITY.md) の報告先)
