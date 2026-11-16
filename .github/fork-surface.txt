@@ -8,6 +8,7 @@
 .github/bot/meltype-bot.mjs
 .github/bot/notices.mjs
 .github/bot/sponsors.mjs
+.github/dependabot.yml
 .github/workflows/bot.yml
 .github/workflows/cla.yml
 .github/workflows/code-scanning.yml
@@ -18,6 +19,7 @@
 .github/workflows/release.yml
 .github/workflows/sponsors.yml
 .github/workflows/winget.yml
+.mergify.yml
 CONTRIBUTING.md
 README.md
 SECURITY.md
