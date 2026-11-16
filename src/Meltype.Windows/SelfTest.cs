@@ -47,6 +47,10 @@ internal static class SelfTest
             if (Updater.Staged(allowPrerelease: true) is not null || Updater.Apply(allowPrerelease: true) ||
                 Updater.ApplyStagedAtStartup(() => true, allowPrerelease: true))
                 throw new InvalidOperationException("ポータブル版で通常版の更新を実行できる");
+            Startup.Set(true);
+            if (Startup.IsEnabled) throw new InvalidOperationException("ポータブル版で通常版の起動登録を変更できる");
+            Startup.Set(false);
+            Startup.MigrateToTask();
             using var updater = new Updater(() => true, () => true);
             return updater.CheckNowAsync().GetAwaiter().GetResult();
         });

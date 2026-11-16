@@ -40,6 +40,8 @@ internal static class Startup
 
     public static void Set(bool enabled)
     {
+        // ポータブル版の起動は配布側が管理する。通常版の既存登録も変更しない。
+        if (Config.AppPaths.IsPortable) return;
         if (enabled)
         {
             if (CreateTask(Application.ExecutablePath))
@@ -67,6 +69,7 @@ internal static class Startup
     /// </summary>
     public static void MigrateToTask()
     {
+        if (Config.AppPaths.IsPortable) return;
         try
         {
             if (HasLegacyEntry() && !TaskExists() && CreateTask(Application.ExecutablePath))
