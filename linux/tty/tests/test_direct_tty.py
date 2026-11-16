@@ -177,7 +177,7 @@ void* meltype_ime_handle(void* p, const char* event) {
         self.assertEqual(result["view"]["meaning"], "意味")
 
     def test_host_reconversion_and_caret_edits_stop_before_any_child_effect(self):
-        for unsupported in [{"removeBefore": "日本"}, {"moveCaretBack": 1}]:
+        for unsupported in [{"removeBefore": "日本"}, {"moveCaretBack": 1}, {"deleteBefore": 2}]:
             with self.subTest(edit=unsupported), self.assertRaises(app.UnsafeEffect):
                 app.session_result({"consumed": True, "commits": [
                     {"text": "safe", "removeBefore": None, "moveCaretBack": 0},

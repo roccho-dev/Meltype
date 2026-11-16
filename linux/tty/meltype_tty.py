@@ -86,7 +86,11 @@ class NativeSession:
                 raise
         # Composition mode is an explicit frontend request; ordinary Direct
         # Input still forwards keys without calling native code until conversion.
-        self._send(self.session, "JapaneseModeSelected")
+        try:
+            self._send(self.session, "JapaneseModeSelected")
+        except BaseException:
+            self.close()
+            raise
 
     def bind_target(self, token):
         self.target = token
@@ -146,7 +150,7 @@ class NativeSession:
         event = {"version": 1, "type": event_type, "instance": "tty",
                  "field": {"canRemove": False}, **fields}
         reply = self._result(self.lib.meltype_ime_handle(session, json.dumps(event).encode()))
-        if not isinstance(reply, dict) or reply.get("version") != 1 or not isinstance(reply.get("state"), dict):
+        if not isinstance(reply, dict) or type(reply.get("version")) is not int or reply["version"] != 1 or not isinstance(reply.get("state"), dict):
             raise UnsafeEffect("invalid ImeHost protocol response")
         return session_result(reply.get("result"))
 
@@ -215,9 +219,10 @@ def session_result(value):
         raise UnsafeEffect("invalid ImeHost SessionResult")
     edits = []
     for edit in value["commits"]:
-        if not isinstance(edit, dict) or not isinstance(edit.get("text"), str):
+        if not isinstance(edit, dict) or not isinstance(edit.get("text"), str) or "removeBefore" not in edit:
             raise UnsafeEffect("invalid ImeHost TextEdit")
-        if edit.get("removeBefore") is not None or edit.get("moveCaretBack", 0) != 0:
+        caret_back = edit.get("moveCaretBack", 0)
+        if edit["removeBefore"] is not None or type(caret_back) is not int or caret_back != 0 or edit.get("deleteBefore", 0) != 0:
             raise UnsafeEffect("surrounding-text edits require an observed editable target")
         edits.append({"deleteBefore": 0, "text": edit["text"]})
     view = value.get("view")
