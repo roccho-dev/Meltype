@@ -25,7 +25,7 @@ internal readonly record struct ProposalTarget(
     }
 }
 
-internal sealed class ProposalPendingRequest
+internal sealed class ProposalPendingRequest : IDisposable
 {
     private readonly object _gate = new();
     private readonly CancellationTokenSource _source = new();
@@ -51,7 +51,11 @@ internal sealed class ProposalPendingRequest
         }
     }
 
-    public void Complete()
+    public void Complete() => Dispose();
+
+    // Dispose releases the HTTP request's source after its continuation ends.
+    // It does not cancel an already queued successful UI delivery.
+    public void Dispose()
     {
         lock (_gate)
         {

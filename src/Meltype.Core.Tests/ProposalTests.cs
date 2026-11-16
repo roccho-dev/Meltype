@@ -256,6 +256,14 @@ internal static class ProposalTests
         cancel.Invoke(pending, null);
         complete.Invoke(pending, null);
         Assert.True((bool)cancelled.GetValue(pending)!, "cancel/complete競合をidempotentに閉じる");
+
+        var delivered = Activator.CreateInstance(type, nonPublic: true)
+            ?? throw new AssertionException("ProposalPendingRequest を作れない");
+        ((IDisposable)delivered).Dispose();
+        Assert.True(!(bool)cancelled.GetValue(delivered)!, "正常完了の解放は、キューにある成功応答を取り消さない");
+        cancel.Invoke(delivered, null);
+        ((IDisposable)delivered).Dispose();
+        Assert.True((bool)cancelled.GetValue(delivered)!, "完了後の明示取消は安全にキューへ届く");
     }
 
     [Test]
