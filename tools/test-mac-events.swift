@@ -26,17 +26,11 @@ final class EventClient: NSObject, IMKTextInput {
  func string(from range:NSRange, actualRange:UnsafeMutablePointer<NSRange>!)->String! {actualRange?.pointee=range;return attributedSubstring(from:range)?.string}
  func firstRect(forCharacterRange range:NSRange, actualRange:UnsafeMutablePointer<NSRange>!)->NSRect {actualRange?.pointee=range;return .zero}
 }
-#if !REAL_CONVERTER
-final class MeltypeConverter {
- static let shared=MeltypeConverter()
- func clauses(for text:String,context:String?)->[(reading:String,text:String)] {[]}
- func candidates(for text:String)->[String] {[]}
-}
-#endif
 var candidatesWindow: IMKCandidates? = nil
 @main
 struct EventTests {
  static func main() {
+  NativeCore.shared.initialize()
   let app=NSApplication.shared
   app.setActivationPolicy(.prohibited)
   guard let server=IMKServer(name:"LocalMeltypeBoundaryTests",bundleIdentifier:Bundle.main.bundleIdentifier) else {fatalError("IMKServer creation failed")}
@@ -91,13 +85,30 @@ struct EventTests {
     case "Tab": _=key(controller,client,"\t",code:UInt16(kVK_Tab))
     default: controller.commitComposition(client)
     }
-    #if REAL_CONVERTER
-    precondition(client.document.contains("「@kuraido」"),"protected token changed")
-    precondition(!client.document.contains("kyouha") && !client.document.contains("ashita"),"Japanese gaps skipped")
-    #else
     equal(client.document,"きょうは「@kuraido」あした")
-    #endif
     equal(client.marked,"")
+   }
+  }
+  let operationKeys: [(Int, Int)] = [
+   (kVK_ForwardDelete, NSDeleteFunctionKey), (kVK_ANSI_KeypadClear, NSClearLineFunctionKey),
+   (kVK_F1, NSF1FunctionKey), (kVK_F2, NSF2FunctionKey), (kVK_F3, NSF3FunctionKey),
+   (kVK_F4, NSF4FunctionKey), (kVK_F5, NSF5FunctionKey), (kVK_F11, NSF11FunctionKey),
+   (kVK_F12, NSF12FunctionKey), (kVK_F13, NSF13FunctionKey), (kVK_F14, NSF14FunctionKey),
+   (kVK_F15, NSF15FunctionKey), (kVK_F16, NSF16FunctionKey), (kVK_F17, NSF17FunctionKey),
+   (kVK_F18, NSF18FunctionKey), (kVK_F19, NSF19FunctionKey), (kVK_F20, NSF20FunctionKey),
+  ]
+  for (code, scalar) in operationKeys {
+   for converting in [false, true] {
+    check("operation key \(code), converting \(converting)") { controller,client in
+     type(controller,client,"a")
+     if converting { _=key(controller,client," ",code:UInt16(kVK_Space)) }
+     let text=String(UnicodeScalar(scalar)!)
+     let event=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:0,context:nil,characters:text,charactersIgnoringModifiers:text,isARepeat:false,keyCode:UInt16(code))!
+     precondition(!controller.handle(event,client:client),"operation key must pass through")
+     equal(client.document,"あ");equal(client.marked,"")
+     precondition(!controller.handle(event,client:client),"empty composition must pass through")
+     equal(client.document,"あ")
+    }
    }
   }
   check("Backspace at protected boundary") { controller,client in
@@ -117,18 +128,6 @@ struct EventTests {
   check("Command shortcut commits once") { controller,client in
    type(controller,client,"@kuraido");precondition(!key(controller,client,"a",flags:.command));equal(client.document,"@kuraido");equal(client.marked,"")
   }
-  #if REAL_CONVERTER
-  let converter=MeltypeConverter.shared
-  let candidates=converter.candidates(for:"きょう")
-  precondition(candidates.contains("今日"),"real dictionary conversion missing: \(candidates)")
-  let clauses=converter.clauses(for:"きょうはいいてんき",context:nil)
-  precondition(clauses.map(\.reading).joined()=="きょうはいいてんき","real clause readings lost")
-  precondition(clauses.map(\.text).joined().contains("今日"),"real clause conversion missing")
-  guard let directory=NativeCore.shared.dataDirectory else {fatalError("missing data directory")}
-  precondition(FileManager.default.fileExists(atPath:directory+"/azooKey"),"converter ignored isolated data directory")
-  passed+=3
-  print("PASS: actual azooKey candidates, clause reading coverage, isolated data directory")
-  #endif
   print("\(passed) Mac event/integration cases passed (synthetic client; OS IME registration and app GUI NOT_RUN)")
  }
 }

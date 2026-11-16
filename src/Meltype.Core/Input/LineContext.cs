@@ -13,6 +13,7 @@ public enum LineKind
     /// <summary>コメントの中 (// # -- /* <!-- など)。日本語を書くことが多い。</summary>
     Comment,
     /// <summary>文字列の中 ("…" '…' `…`)。日本語を書くことが多い。</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "文字列リテラルの中という位置を表す値。データ型の名前ではない。")]
     String,
     /// <summary>ターミナルで動く AI・チャットの入力 (Claude Code・Codex などの「&gt; 」の後)。日本語を書くことが多い。</summary>
     Prompt,
@@ -190,6 +191,8 @@ public static class LineContext
     {
         "WindowsTerminal.exe", "OpenConsole.exe", "conhost.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
         "wezterm-gui.exe", "alacritty.exe", "mintty.exe", "rio.exe",
+        "com.apple.Terminal", "com.googlecode.iterm2", "com.github.wez.wezterm", "org.alacritty", "com.mitchellh.ghostty", "net.kovidgoyal.kitty", "dev.warp.Warp-Stable",
+        "gnome-terminal-server", "konsole", "kitty", "alacritty", "wezterm-gui", "foot", "ghostty", "xterm", "tilix", "terminator", "xfce4-terminal",
     };
 
     /// <summary>エディター以外の入力欄 (チャット・拡張機能の画面) も多い、Electron 製のエディター。</summary>
@@ -202,11 +205,15 @@ public static class LineContext
     /// 「コード」のアプリで、フォーカスのある入力欄がコードを書く場所か (UI Automation の名前・クラス名から)。
     /// チャット・AI への入力欄 (VS Code の Copilot Chat、Claude Code の画面など) は一般のアプリと同じに扱う。
     /// VS Code などの Electron 製のエディターは入力欄の種類が多いので、エディター・ターミナル・検索と分かるものだけをコードとする。
+    /// element は UI Automation で調べた要素 (Windows)。分からなければ、アプリ全体をコードを書く場所とする。
     /// </summary>
-    public static CodeFocus ClassifyFocus(string process, string name, string className)
+    public static CodeFocus ClassifyFocus(string process, Ime.ImeElement? element)
     {
+        var name = element?.Name ?? "";
+        var className = element?.ClassName ?? "";
         if (ContainsAny(name, ChatWords)) return CodeFocus.None;
         if (TerminalProcesses.Contains(process) || ContainsAny(name, TerminalWords) || className.Contains("TermControl", StringComparison.Ordinal)) return CodeFocus.Terminal;
+        if (element is null) return CodeFocus.Editor;
         if (ElectronEditors.Contains(process)) return ContainsAny(name, EditorWords) || ContainsAny(name, SearchWords) ? CodeFocus.Editor : CodeFocus.None;
         return CodeFocus.Editor;
     }
@@ -235,90 +242,5 @@ public static class LineContext
             if (index > 0 && (index + extension.Length == title.Length || !char.IsLetterOrDigit(title[index + extension.Length]))) return true;
         }
         return false;
-    }
-}
-
-/// <summary>
-/// キャレットより前の文字列を、打鍵から追いかける (フックのスレッドと UI スレッドから呼ばれる)。
-/// 複数行のコメント・文字列 (""" … """、/* … */) の中かを調べるため、前の行も最大 4000 文字持つ (行の区切りは改行 1 文字)。
-/// キャレットが動いた (矢印キー・クリック・フォーカスの変化・Ctrl の操作) ら分からなくなり、UI Automation で読み直す。
-/// </summary>
-public sealed class LineTracker
-{
-    private const int MaxLength = 4000;
-    private readonly object _gate = new();
-    private readonly StringBuilder _text = new();
-    private bool _known;
-
-    /// <summary>キャレットより前の文字列 (前の行も含む)。分からなければ null。</summary>
-    public string? Text
-    {
-        get { lock (_gate) return _known ? _text.ToString() : null; }
-    }
-
-    public void Append(string text)
-    {
-        lock (_gate)
-        {
-            if (!_known) return;
-            foreach (var c in text) _text.Append(c == '\r' ? '\n' : c);
-            Trim();
-        }
-    }
-
-    public void Backspace()
-    {
-        lock (_gate)
-        {
-            if (!_known) return;
-            // 改行を消したら前の行とつながる (前の行も持っているので分かる)。
-            if (_text.Length > 0) _text.Length--;
-            else _known = false;
-        }
-    }
-
-    /// <summary>Enter: 新しい行 (自動のインデントは分からないが、空白なので判定には影響しない)。</summary>
-    public void NewLine()
-    {
-        lock (_gate)
-        {
-            // 前の行が分からなければ、新しい行から追いかける (複数行のコメント・文字列の中かは分からない)。
-            if (!_known) _text.Clear();
-            else _text.Append('\n');
-            _known = true;
-            Trim();
-        }
-    }
-
-    /// <summary>キャレットが動いたかもしれない。</summary>
-    public void Invalidate()
-    {
-        lock (_gate)
-        {
-            _text.Clear();
-            _known = false;
-        }
-    }
-
-    public bool IsKnown
-    {
-        get { lock (_gate) return _known; }
-    }
-
-    /// <summary>UI Automation で読んだキャレットより前の文字列 (前の行も含めて持つ)。</summary>
-    public void SetFromText(string before)
-    {
-        lock (_gate)
-        {
-            _text.Clear();
-            _text.Append(before.Replace("\r\n", "\n").Replace('\r', '\n'));
-            _known = true;
-            Trim();
-        }
-    }
-
-    private void Trim()
-    {
-        if (_text.Length > MaxLength) _text.Remove(0, _text.Length - MaxLength);
     }
 }

@@ -1,6 +1,8 @@
 # サードパーティー通知
 
-Meltype のソースコード (このリポジトリ) には、他者の著作物は含まれていません。
+Meltype のソースコード (このリポジトリ) には、次のものを除いて他者の著作物は含まれていません。
+
+- かな配列 (月配列 U9・花配列・NICOLA・中指NICOLA・TRON 配列) の表 (`src/Meltype.Core/Input/KanaLayout.cs`): [benizara](https://github.com/k-ayaki/benizara) の配列定義ファイルから取りました。MIT License (Copyright (c) 2018 綾木健一郎)
 
 ## 配布用パッケージに同梱しているもの
 
@@ -9,22 +11,24 @@ Meltype のソースコード (このリポジトリ) には、他者の著作�
 | .NET ランタイム (Microsoft.NETCore.App, Microsoft.WindowsDesktop.App) | MIT License | `app\dotnet\` (ライセンス: `app\dotnet\LICENSE.txt`、同梱部品の通知: `app\dotnet\ThirdPartyNotices.txt`) |
 | Microsoft Visual C++ のランタイム (`msvcp140.dll`・`vcruntime140.dll` など、Mozc の変換ヘルパーが使うもの。一覧は `app\mozc\VC-RUNTIME.txt`) | Microsoft Visual Studio ソフトウェア ライセンス条項の「再頒布可能コード」(Visual Studio の VC\Redist にあり、REDIST の一覧に載っているファイル。変えずにアプリと一緒に配ることが認められている) | `app\mozc\` |
 | [Mozc](https://github.com/google/mozc) の変換エンジンと辞書 (`meltype_mozc_helper.exe`。Meltype 用の小さな入出力部分 `native/mozc/meltype_mozc_helper.cc` を足してビルドしたもの) | Mozc: BSD-3-Clause (Copyright Google Inc.)。辞書: IPAdic (NAIST)・ICOT・沖縄辞書 のライセンス。組み込みのライブラリ: Abseil (Apache-2.0)・Protocol Buffers (BSD-3-Clause)・Japanese Usage Dictionary など | `app\mozc\` (ライセンス: `app\mozc\MOZC-LICENSE.txt`、辞書とライブラリの全文: `app\mozc\MOZC-CREDITS.html`。Qt は使っていない) |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) の `llama-server.exe` と DLL (CPU 版。Zenzai に使う。版とハッシュは `native/zenzai/Get-Zenzai.ps1` で固定) | MIT License (Copyright The ggml authors)。組み込みの LLVM OpenMP (`libomp.dll`): Apache-2.0 WITH LLVM-exception | `app\zenzai\` (ライセンス: `app\zenzai\LICENSE-llama.cpp.txt`・`LICENSE-LLVM-OpenMP`、`app\zenzai\ZENZAI-NOTICE.txt`) |
+| [zenz-v3.2-small](https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf) (Zenzai のかな漢字変換モデル。`zenz-v3.2-small-Q5_K_M.gguf`) | Apache License 2.0 (Miwa-Keita) | `app\zenzai\` (ライセンス: `app\zenzai\LICENSE-zenz.txt`) |
 
-## Mac 版 (mac/) がビルド時に取り込むもの
+ポータブル版も通常版と同じフォルダー構成で配布します。アプリと .NET ランタイムに関するライセンス・第三者通知、および Mozc をビルドに含める場合のライセンス・辞書クレジットは、各配布物に同梱します。Mozc の VC ランタイム DLL は元のバイナリを変更せずに実行し、対象ファイルの一覧を `VC-RUNTIME.txt` に記載します。
+
+## Mac 版 (mac/) に同梱するもの
 
 | 部品 | ライセンス | 使い方 |
 | --- | --- | --- |
-| [AzooKeyKanaKanjiConverter](https://github.com/azooKey/AzooKeyKanaKanjiConverter) (azooKey の変換エンジンと辞書) | MIT License | Swift Package として取り込み、Meltype.app に組み込む (漢字変換)。Meltype.app を配布するときは、azooKey のライセンス表示も同梱する |
 | .NET ランタイム (NativeAOT) | MIT License | libMeltypeNative.dylib に組み込まれる |
-| [swift-collections](https://github.com/apple/swift-collections)・[swift-algorithms](https://github.com/apple/swift-algorithms)・[swift-numerics](https://github.com/apple/swift-numerics) (Apple) | Apache License 2.0 | AzooKeyKanaKanjiConverter が使う部品として、一緒に Meltype.app に組み込まれる (`mac/Package.resolved` で版を固定) |
-| [Jinja](https://github.com/johnmai-dev/Jinja)・[swift-tokenizers](https://github.com/ensan-hcl/swift-tokenizers) | Apache License 2.0 | AzooKeyKanaKanjiConverter が依存する部品 (`mac/Package.resolved` で版を固定)。組み込まれる場合は、ライセンス表示を同梱する |
+| [Mozc](https://github.com/google/mozc) の変換エンジンと辞書 (`meltype_mozc_helper`。Windows 版と同じソース) | Windows 版と同じ | `Meltype.app/Contents/Resources/mozc/` (ライセンス: `MOZC-LICENSE.txt`、辞書とライブラリの全文: `MOZC-CREDITS.html`) |
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) の `llama-server` と dylib (Zenzai に使う。版とハッシュは `native/zenzai/zenzai.env` で固定) | MIT License (Copyright The ggml authors) | `Meltype.app/Contents/Resources/zenzai/` (ライセンス: `LICENSE-llama.cpp.txt`) |
+| [zenz-v3.2-small](https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf) (Zenzai のモデル) | Apache License 2.0 (Miwa-Keita) | `Meltype.app/Contents/Resources/zenzai/` (ライセンス: `LICENSE-zenz.txt`) |
 
 ## 実行時に使う Windows の機能 (同梱しない)
 
 次は Windows に標準で入っているものを実行時に呼び出すだけで、Meltype には含まれません。
 
-- Microsoft IME の変換エンジン (IFELanguage)
-- Windows の変換候補 API (Windows.Data.Text.TextConversionGenerator)
 - Windows のスペルチェッカー (ISpellChecker)
 - UI Automation、IMM32、Text Services Framework
 
@@ -41,6 +45,10 @@ Meltype のソースコード (このリポジトリ) には、他者の著作�
 ### 読みの一覧 (dictionaries/readings.txt)
 
 ローマ字の打ち間違いを直すときに、直した読みがよく使う語になるかを調べるのに使います。JMdict のよく使う語 (同じ印) の読みと活用の種類を `tools/make-readings.mjs` で取り出して作りました。著作権・ライセンスは英訳の候補と同じ (EDRDG、CC BY-SA 4.0) で、この派生データも CC BY-SA 4.0 です。
+
+### カタカナで書く語の読みの一覧 (dictionaries/katakana.txt)
+
+日英の区切りで、よく使う語の読みに無いカタカナ語 (ホスティング) を日本語の語として読むのに使います。JMdict のカタカナだけの読みを `tools/make-katakana.mjs` で取り出して作りました。著作権・ライセンスは英訳の候補と同じ (EDRDG、CC BY-SA 4.0) で、この派生データも CC BY-SA 4.0 です。
 
 ### 英字で書く語の候補 (dictionaries/loanwords.txt)
 
@@ -357,11 +365,200 @@ authorization of the copyright holder.
 SPDX-License-Identifier: Unicode-3.0
 ```
 
+### 通貨の換算に使うレート (dictionaries/exchange-rates.txt)
+
+欧州中央銀行 (European Central Bank) が公開している参照レート (https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml) を、`tools/make-exchange-rates.mjs` で取り出して作りました。ECB のウェブサイトの情報は、正確に載せ、ECB を出典として書けば自由に使えます (https://www.ecb.europa.eu/home/disclaimer/html/index.en.html の「Copyright」)。値は変えずに載せています。
+
+- 出典: European Central Bank
+
+### 国名の語 (dictionaries/countries.txt)
+
+かなに割れる国名 (Bermuda → Bermuだ) を英語にするのに使います (ローマ字として最後まで読める語は今は使わない。#1869)。[Unicode CLDR](https://github.com/unicode-org/cldr) の `common/main/en.xml` の国・地域名を `tools/make-countries.mjs` で語に分けて作りました。著作権・ライセンスは絵文字の辞書と同じ (Unicode, Inc.、Unicode License v3) です。
+
+### 分野の辞書 (dictionaries/domain-*.txt)
+
+変換の候補に専門用語・固有名詞を足すのに使います。`tools/make-domain-dictionaries.py` で、元の辞書から読みと表記を取り出し、読みで 1 行にまとめ、かなだけで書く語とよく使う語の読みを除いて作りました。
+
+| ファイル | 元データ | 著作権 | ライセンス |
+| --- | --- | --- | --- |
+| `domain-medical.txt` | [JMED-DICT-mini](https://sociocom.naist.jp/jmed-dict/) ver 1.1.2 (病名・医薬品・部位の各データの上位 10,000 行) | 奈良先端科学技術大学院大学 ソーシャル・コンピューティング研究室 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| `domain-it.txt` | [IDiME](https://github.com/ssvp003/IDiME) (情報処理学会 情報入試委員会「情報科全教科書用語リスト 第2版」をもとにしたもの) | ssvp003、情報処理学会 情報入試委員会 | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)。この派生データも CC BY-SA 4.0 |
+| `domain-stations.txt` | [SKK 辞書](https://github.com/skk-dev/dict) SKK-JISYO.station | MITA Yuusuke、SKK Development Team | GPL-2.0-or-later (Meltype では GPL-3.0-or-later で使う) |
+| `domain-propernouns.txt` | SKK 辞書 SKK-JISYO.propernoun | MITA Yuusuke、SKK Development Team | GPL-2.0-or-later (同上) |
+| `domain-names.txt` | SKK 辞書 SKK-JISYO.jinmei・SKK-JISYO.fullname | Wnn Consortium、SKK Development Team、Akie Kaidoh | GPL-2.0-or-later (同上) |
+| `domain-propernouns-sudachi.txt`・`domain-words-sudachi.txt` | [SudachiDict](https://github.com/WorksApplications/SudachiDict) core (20261015) の固有名詞 (一般)・普通名詞 (正規化表記と同じ表記だけ) | Works Applications Co., Ltd.。一部は UniDic (Copyright (c) 2011-2013, The UniDic Consortium) | Apache License 2.0。UniDic 由来の部分は BSD-3-Clause (下の全文) |
+| `domain-laws.txt` | [e-Gov 法令検索](https://laws.e-gov.go.jp/) の法令 API の、今ある法律の題名と読み | デジタル庁 | [公共データ利用規約 (第1.0版)](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0) (CC BY 4.0 と互換)。出典: e-Gov 法令検索。題名と読みを取り出して加工した |
+
+どの辞書も、Mozc が読みから出せる語を除いています (Mozc の変換ヘルパーに読みを変換させて比べた)。SudachiDict は漢字を含む表記だけを入れ、人名 (固有名詞,人名。まれな字の組み合わせが多く、名前として確かめられない) と地名 (固有名詞,地名,一般。町名・字名がほとんど) は入れていません。
+
+SudachiDict に含まれる UniDic のライセンス (SudachiDict の LEGAL):
+
+```
+Copyright (c) 2011-2013, The UniDic Consortium
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+ * Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the
+   distribution.
+
+ * Neither the name of the UniDic Consortium nor the names of its
+   contributors may be used to endorse or promote products derived
+   from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+- src/main/text/core_lex.csv and src/main/text/notcore_lex.csv contain
+a part of NEologd (https://github.com/neologd/mecab-unidic-neologd).
+
+Copyright (C) 2015-2019 Toshinori Sato (@overlast)
+
+      https://github.com/neologd/mecab-unidic-neologd
+
+    i. 本データは、株式会社はてなが提供するはてなキーワード一覧ファイル
+       中の表記、及び、読み仮名の大半を使用している。
+
+       はてなキーワード一覧ファイルの著作権は、株式会社はてなにある。
+
+       はてなキーワード一覧ファイルの使用条件に基づき、また、
+       データ使用の許可を頂いたことに対する感謝の意を込めて、
+       以下に株式会社はてなおよびはてなキーワードへの参照をURLで示す。
+
+       株式会社はてな : http://hatenacorp.jp/information/outline
+
+       はてなキーワード :
+       http://developer.hatena.ne.jp/ja/documents/keyword/misc/catalog
+
+   ii. 本データは、日本郵便株式会社が提供する郵便番号データ中の表記、
+       及び、読み仮名を使用している。
+
+       日本郵便株式会社は、郵便番号データに限っては著作権を主張しないと
+       述べている。
+
+       日本郵便株式会社の郵便番号データに対する感謝の意を込めて、
+       以下に日本郵便株式会社および郵便番号データへの参照をURLで示す。
+
+       日本郵便株式会社 :
+         http://www.post.japanpost.jp/about/profile.html
+
+       郵便番号データ :
+         http://www.post.japanpost.jp/zipcode/dl/readme.html
+
+  iii. 本データは、スナフキん氏が提供する日本全国駅名一覧中の表記、及び
+       読み仮名を使用している。
+
+       日本全国駅名一覧の著作権は、スナフキん氏にある。
+
+       スナフキん氏は 「このデータを利用されるのは自由ですが、その際に
+       不利益を被ったりした場合でも、スナフキんは一切責任は負えません
+       ことをご承知おき下さい」と述べている。
+
+       スナフキん氏に対する感謝の意を込めて、
+       以下に日本全国駅名一覧のコーナーへの参照をURLで示す。
+
+       日本全国駅名一覧のコーナー :
+         http://www5a.biglobe.ne.jp/~harako/data/station.htm
+
+   iv. 本データは、工藤拓氏が提供する人名(姓/名)エントリデータ中の、
+       漢字表記の姓・名とそれに対応する読み仮名を使用している。
+
+       人名(姓/名)エントリデータは被災者・安否不明者の人名の
+       表記揺れ対策として、Mozcの人名辞書を活用できるという
+       工藤氏の考えによって提供されている。
+
+       工藤氏に対する感謝の意を込めて、
+       以下にデータ本体と経緯が分かる情報への参照をURLで示す。
+
+       人名(姓/名)エントリデータ :
+         http://chasen.org/~taku/software/misc/personal_name.zip
+
+       上記データが提供されることになった経緯
+         http://togetter.com/li/111529
+
+    v. 本データは、Web上からクロールした大量の文書データから抽出した
+       表記とそれに対応する読み仮名のデータを含んでいる。
+
+       抽出した表記とそれに対応する読み仮名の組は、上記の i. から iv.
+       の言語資源の組み合わせによって得られる組のみを採録した。
+
+       Web 上に文書データを公開して下さっている皆様に感謝いたします。
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
 ### そのほかの辞書
 
 `dictionaries/` の辞書 (日本語・英語の単語、固有名詞、同音異義語の候補、文脈の手がかり) は Meltype のために作成したもので、
 Meltype 本体と同じライセンス (GPL-3.0-or-later) です。
 固有名詞の辞書に含まれる製品名・会社名は各社の商標です。
+
+### Mozc-UT 辞書 (同梱しない。ユーザーが任意で用意するもの)
+
+Meltype は **Mozc-UT 辞書を同梱していません**。Mozc-UT 辞書 (mozcdic-ut.txt など) は、[merge-ut-dictionaries](https://github.com/utuhiro78/merge-ut-dictionaries) などを使ってユーザー自身が用意する任意のデータです。Meltype は、環境変数 `MELTYPE_UT_DICTIONARY` で指定されたファイルを、そのユーザーの手元の Mozc ビルドにマージするだけです。Meltype の配布物には UT 辞書のデータは含まれず、Meltype が UT 辞書をダウンロードすることもありません。
+
+| 部品 | ライセンス | 同梱先 |
+| --- | --- | --- |
+| Mozc-UT 辞書 (mozcdic-ut.txt など。複数の辞書を連結したもの) | 辞書ごとに異なります (下の表)。CC BY-SA・Apache-2.0・パブリックドメイン・GPL-2.0-only などが混在しています | 同梱しません。`MELTYPE_UT_DICTIONARY` でユーザーが指定したファイルだけを、そのユーザーの環境でビルドする Mozc にマージします |
+
+#### UT 辞書を構成する辞書
+
+| 辞書 | ライセンス | 入手元 |
+| --- | --- | --- |
+| 人名辞書 (personal names) | Apache-2.0 (リポジトリの表示) | https://github.com/utuhiro78/mozcdic-ut-personal-names |
+| 地名辞書 (place names) | パブリックドメイン相当 (日本郵便が郵便番号データについて著作権を主張していない) | https://github.com/utuhiro78/mozcdic-ut-place-names / 日本郵便「郵便番号データの説明」 https://www.post.japanpost.jp/zipcode/dl/readme.html |
+| SudachiDict | Apache-2.0 (UniDic の BSD-3-Clause のデータと、NEologd 由来のデータを含みます) | https://github.com/utuhiro78/mozcdic-ut-sudachidict / https://github.com/WorksApplications/SudachiDict/blob/develop/LEGAL |
+| jawiki (日本語版ウィキペディア由来) | CC BY-SA (**バージョンの記載がありません**) | https://github.com/utuhiro78/mozcdic-ut-jawiki / https://ja.wikipedia.org/wiki/Wikipedia:ウィキペディアを二次利用する |
+| NEologd | Apache-2.0 (はてなキーワード・駅名一覧・人名データなど、第三者のデータを含みます) | https://github.com/utuhiro78/mozcdic-ut-neologd / https://github.com/neologd/mecab-ipadic-neologd/blob/master/COPYING |
+| EDICT2 | CC BY-SA 4.0 (Electronic Dictionary Research and Development Group) | https://github.com/utuhiro78/mozcdic-ut-edict2 / https://www.edrdg.org/edrdg/licence.html |
+| SKK-JISYO | GPL-2.0-or-later | https://github.com/utuhiro78/mozcdic-ut-skk-jisyo / https://github.com/skk-dev/dict |
+| alt-cannadic | GPL-2.0 (only。**Meltype では使用できません**) | https://github.com/utuhiro78/mozcdic-ut-alt-cannadic |
+
+#### UT 辞書を有効にしたビルドを配布する場合
+
+Meltype は UT 辞書入りのビルドを配布しません。配布するのは、そのビルドを作ったあなた自身です。
+
+- **CC BY-SA の部分 (jawiki・EDICT2)**: 出典 (ウィキペディアの記事へのリンク、EDRDG への謝辞) を表示し、改変したこと (コスト・品詞 ID の書き換え、重複の削除、語の取捨選択) を明示し、ライセンス正文または URI を同梱し、二次的著作物も同じ条件で許諾してください (ShareAlike)。EDRDG の辞書は「最新版に更新する手続きを用意すること」「EDRDG の著作権を自分のものと主張しないこと」も求めています。jawiki 辞書は CC BY-SA のバージョンを明記しておらず、CC BY-SA 3.0 のデータは GPLv3 と組み合わせることができません。
+- **Apache-2.0 の部分 (SudachiDict・NEologd・人名辞書・UT のコード)**: 著作権表示・ライセンス正文・NOTICE を保持してください。SudachiDict と NEologd には、UniDic (BSD-3-Clause) と、はてなキーワード・駅名一覧・人名データなど第三者のデータが含まれます。上流の `LEGAL` と `COPYING` の帰属表示もあわせて同梱してください。
+- **GPL-2.0-or-later の部分 (SKK-JISYO)**: GPL の条件 (ソースの提供など) に従ってください。
+- **GPL-2.0 (only) の部分 (alt-cannadic)**: GPLv2 は GPLv3 と互換ではないため、**Meltype (GPL-3.0-or-later) と組み合わせて配布することはできません**。alt-cannadic を含む UT 辞書は使用しないでください。
+- **パブリックドメイン相当の部分 (地名辞書)**: 日本郵便は郵便番号データについて著作権を主張していませんが、日本郵便への謝意を明記することをおすすめします。
+- **GPLv3 (Meltype 本体)**: UT 辞書を入れたバイナリを配布する場合、Meltype 本体の GPL-3.0-or-later の条件 (対応するソースの提供など) も満たす必要があります。
+
+#### Mozc 本体の辞書
+
+Mozc の変換エンジンに同梱される Mozc 本体の辞書 (IPAdic (NAIST)・ICOT・沖縄辞書) のライセンスは、UT 辞書を追加しても変わりません。`app\mozc\MOZC-CREDITS.html` の記載を引き続き同梱してください。
+
+#### 公式の成果物ではありません
+
+UT 辞書を有効にしてビルドしたバイナリは、**あなた自身のビルド**です。Meltype の公式な配布物ではなく、Meltype のサポートや動作保証の対象でもありません。
 
 ### README の画像
 

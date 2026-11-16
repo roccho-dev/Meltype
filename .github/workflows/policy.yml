@@ -1,0 +1,60 @@
+# PR の件数制限と、投稿者の返事を待っている Issue・PR の期限管理。
+# 閉じる Issue の担当でない人の PR を Draft にする (assignee.mjs)。
+# 書き込み job は必ず main のスクリプトを使い、PR のコードを実行しない。
+name: policy
+
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened]
+  issue_comment:
+    types: [created, edited]
+  schedule:
+    # 件数の超過のラベルの付け外し・14 日の期限・担当でない人の PR の確認は 1 時間ごとにする (PR のイベントでは動かさない)
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  enforce:
+    if: github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: policy-enforce
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: .github/bot
+          persist-credentials: false
+      - run: node .github/bot/policy.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # 閉じる Issue の担当でない人の PR を Draft にする。開いているすべての PR を確かめる
+  assignee:
+    if: contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: policy-assignee
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: .github/bot
+          persist-credentials: false
+      - run: node .github/bot/assignee.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

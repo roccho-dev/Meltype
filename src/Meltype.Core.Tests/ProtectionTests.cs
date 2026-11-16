@@ -90,15 +90,15 @@ internal static class ProtectionTests
     }
 
     [Test]
-    public static void Protected_ReconversionReplacesSelection()
+    public static void Protected_ReconversionDoesNothing()
     {
         var keyboard = new CompositionTests.Keyboard();
         keyboard.Host.Selection = new ReconversionSelection("@user", "@user");
         keyboard.Press(VirtualKeys.Convert);
+        Assert.True(keyboard.Showing is null, "日本語にする所が無いので再変換を始めない");
         keyboard.Press(VirtualKeys.Return);
-        Assert.Equal("@user", keyboard.Host.Document);
-        Assert.Equal(0, keyboard.Host.Output.Count, "選択を置換し、別の確定入力を足さない");
-        Assert.True(keyboard.Showing is null, "再変換の未確定状態を消す");
+        Assert.True(!keyboard.Host.Events.Any(e => e.StartsWith("replace:", StringComparison.Ordinal)), "選択を置き換えない");
+        Assert.Equal(0, keyboard.Host.Output.Count, "確定入力を足さない");
     }
 
     // ---- 確定契約 (MeltypeSession は Linux/Mac アダプターと同じ経路) ----
@@ -107,7 +107,7 @@ internal static class ProtectionTests
     {
         CompositionTests.Detector.SpellChecker = Detection.BuiltInWordChecker.Shared;
         // 製品の CreateDefault と同じく、候補辞書・誤字補正・文脈辞書を入れる (実経路と同じ条件で検査する)。
-        var options = new CompositionOptions
+        var services = new CompositionServices
         {
             Candidates = CandidateDictionary.Load(null),
             ContextRules = ContextRules.Load(null),
@@ -115,10 +115,9 @@ internal static class ProtectionTests
             Misspellings = MisspellingDictionary.Load(null),
             RomajiTypos = RomajiTypoCorrector.Load(CompositionTests.Detector.Romaji),
             Languages = languages,
-            SpaceAroundEnglish = () => spaceAroundEnglish,
         };
         // 行頭の @・/ (#193 の「そのままアプリへ渡す」) を切り、変換ボックスの中の保護区間の扱いを確かめる。
-        return new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), options, () => new Settings { SigilWordsDirect = false });
+        return new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(), services, () => new Settings { SigilWordsDirect = false, SpaceAroundEnglish = spaceAroundEnglish });
     }
 
     private static SessionResult TypeOne(MeltypeSession session, char c)
@@ -144,18 +143,18 @@ internal static class ProtectionTests
     public static void Protected_CommitsIgnoreAutomaticEnglishSpacing()
     {
         foreach (var raw in new[] { "@user", "taro@example.com", "https://example.com", "./src/main.ts", @"C:\Users\taro" })
-        foreach (var operation in new[] { VirtualKeys.Return, VirtualKeys.Space, VirtualKeys.Tab, 0 })
-        {
-            var session = Create(spaceAroundEnglish: true);
-            foreach (var c in raw)
-                session.HandleKey(char.IsAsciiLetter(c) ? char.ToUpperInvariant(c) : 0x07,
-                    c, char.IsAsciiLetterUpper(c), false, false, false, "今日は", "です");
-            var result = operation == 0 ? session.CommitPending() :
-                session.HandleKey(operation, null, false, false, false, false);
-            Assert.Equal(raw + (operation == VirtualKeys.Space ? " " : ""), result.Commits.Single().Text, raw);
-            Assert.Equal(operation != VirtualKeys.Tab, result.Consumed, "Tab だけをアプリへ通す");
-            Assert.True(result.View is null && !session.IsComposing, "確定後の未確定状態を消す");
-        }
+            foreach (var operation in new[] { VirtualKeys.Return, VirtualKeys.Space, VirtualKeys.Tab, 0 })
+            {
+                var session = Create(spaceAroundEnglish: true);
+                foreach (var c in raw)
+                    session.HandleKey(char.IsAsciiLetter(c) ? char.ToUpperInvariant(c) : 0x07,
+                        c, char.IsAsciiLetterUpper(c), false, false, false, "今日は", "です");
+                var result = operation == 0 ? session.CommitPending() :
+                    session.HandleKey(operation, null, false, false, false, false);
+                Assert.Equal(raw + (operation == VirtualKeys.Space ? " " : ""), result.Commits.Single().Text, raw);
+                Assert.Equal(operation != VirtualKeys.Tab, result.Consumed, "Tab だけをアプリへ通す");
+                Assert.True(result.View is null && !session.IsComposing, "確定後の未確定状態を消す");
+            }
     }
 
     [Test]
@@ -284,16 +283,16 @@ internal static class ProtectionTests
     public static void MixedProtectedSpans_CommitAndBackspaceKeepRaw()
     {
         foreach (var token in new[] { "@kuraido", "https://example.com/nihongo", "taro@example.com", "./shumire-shon" })
-        foreach (var operation in new[] { VirtualKeys.Return, VirtualKeys.Space, VirtualKeys.Tab, 0 })
-        {
-            var session = Create();
-            TypeText(session, "kyouha「" + token + "」ashita");
-            var result = operation == 0 ? session.CommitPending() : session.HandleKey(operation, null, false, false, false, false);
-            if (operation == VirtualKeys.Space)
-                result = session.HandleKey(VirtualKeys.Return, null, false, false, false, false);
-            Assert.Equal("きょうは「" + token + "」あした", result.Commits.Single().Text, token);
-            Assert.True(result.View is null, "確定後は表示を消す");
-        }
+            foreach (var operation in new[] { VirtualKeys.Return, VirtualKeys.Space, VirtualKeys.Tab, 0 })
+            {
+                var session = Create();
+                TypeText(session, "kyouha「" + token + "」ashita");
+                var result = operation == 0 ? session.CommitPending() : session.HandleKey(operation, null, false, false, false, false);
+                if (operation == VirtualKeys.Space)
+                    result = session.HandleKey(VirtualKeys.Return, null, false, false, false, false);
+                Assert.Equal("きょうは「" + token + "」あした", result.Commits.Single().Text, token);
+                Assert.True(result.View is null, "確定後は表示を消す");
+            }
         var pending = Create();
         TypeText(pending, "kyouha「@kuraido");
         var erased = pending.HandleKey(VirtualKeys.Back, null, false, false, false, false);
@@ -305,14 +304,14 @@ internal static class ProtectionTests
     public static void MixedProtectedSpans_DoNotAutocorrectRomajiTypos()
     {
         foreach (var token in new[] { "@onegaishimsu", "https://example.com/onegaishimsu", "./onegaishimsu" })
-        foreach (var action in new[] { VirtualKeys.Return, VirtualKeys.Space })
-        {
-            var session = Create();
-            TypeText(session, "kyouha「" + token + "」ashita");
-            var result = session.HandleKey(action, null, false, false, false, false);
-            if (action == VirtualKeys.Space) result = session.HandleKey(VirtualKeys.Return, null, false, false, false, false);
-            Assert.Equal("きょうは「" + token + "」あした", result.Commits.Single().Text, token);
-        }
+            foreach (var action in new[] { VirtualKeys.Return, VirtualKeys.Space })
+            {
+                var session = Create();
+                TypeText(session, "kyouha「" + token + "」ashita");
+                var result = session.HandleKey(action, null, false, false, false, false);
+                if (action == VirtualKeys.Space) result = session.HandleKey(VirtualKeys.Return, null, false, false, false, false);
+                Assert.Equal("きょうは「" + token + "」あした", result.Commits.Single().Text, token);
+            }
     }
 
     [Test]

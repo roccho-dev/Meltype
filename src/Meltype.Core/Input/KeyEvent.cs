@@ -9,7 +9,12 @@ namespace Meltype.Input;
 /// </summary>
 public readonly record struct KeyEvent(int Vk, int Scan, bool Extended, bool IsUp, bool Injected, long TimeMs)
 {
+    /// <summary>修飾キーによる変化を含まない、使用中の配列でのキーコード (取得できなければ 0)。</summary>
+    public int UnmodifiedKey { get; init; }
+    public int ShortcutKey => ToggleShortcut.NormalizeShortcutKey(Vk, Scan, Extended, UnmodifiedKey);
     public bool IsDown => !IsUp;
+    /// <summary>同じ物理キーの押下・解放は、Windows が仮想キーを変更しても対にする。</summary>
+    public int PhysicalId => Scan != 0 ? 0x10000 | Scan | (Extended ? 0x100 : 0) : ToggleShortcut.NormalizeHankakuKey(Vk);
     public override string ToString() => $"{(IsUp ? "↑" : "↓")}{Vk:X2}";
 }
 
@@ -22,7 +27,7 @@ internal static class VirtualKeys
     public const int OemAttn = 0xF0, OemFinish = 0xF1, OemCopy = 0xF2, OemAuto = 0xF3, OemEnlw = 0xF4;
 
     public const int OemComma = 0xBC, OemPeriod = 0xBE, OemMinus = 0xBD, Oem2 = 0xBF, Oem4 = 0xDB, Oem6 = 0xDD;
-    public const int Left = 0x25, Up = 0x26, Right = 0x27, Down = 0x28, F6 = 0x75, F7 = 0x76, F8 = 0x77, F9 = 0x78, F10 = 0x79;
+    public const int PageUp = 0x21, PageDown = 0x22, Left = 0x25, Up = 0x26, Right = 0x27, Down = 0x28, F6 = 0x75, F7 = 0x76, F8 = 0x77, F9 = 0x78, F10 = 0x79;
 
     public static bool IsLetter(int vk) => vk is >= 0x41 and <= 0x5A;
 
@@ -32,14 +37,4 @@ internal static class VirtualKeys
     public static char ToLetter(int vk) => (char)('a' + (vk - 0x41));
 
     public static bool IsModifier(int vk) => vk is Shift or Control or Menu or LShift or RShift or LControl or RControl or LMenu or RMenu or LWin or RWin;
-
-    /// <summary>入力セッションの区切り (設計書 §5)。</summary>
-    public static bool IsSessionBoundary(int vk) => vk is Return or Space or Escape or Tab;
-
-    /// <summary>
-    /// ユーザーが IME の ON/OFF を手で切り替えたとみなすキー。
-    /// 半角/全角 (0xF3/0xF4 と 0x19)、英数 (0xF0)、カタカナひらがな (0xF2)、変換/無変換、IME ON/OFF、かな。
-    /// </summary>
-    public static bool IsImeToggle(int vk) =>
-        vk is Kanji or Kana or ImeOn or ImeOff or Convert or NonConvert or OemAttn or OemCopy or OemAuto or OemEnlw;
 }

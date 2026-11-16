@@ -26,7 +26,7 @@ iku ikimasu itta itte ikanai ikou ikimashou kuru kimasu kita kite konai kimashit
 miru mimasu mita mite minai mimashita taberu tabemasu tabeta tabete tabetai tabemashou
 nomu nomimasu nonda nonde nomitai yomu yomimasu yonda yonde kaku kakimasu kaita kaite
 hanasu hanashimasu hanashita hanashite kiku kikimasu kiita kiite omou omoimasu omotta omotte
-wakaru wakarimasu wakatta wakaranai wakarimashita shiru shitte shiranai shitteru
+wakaru wakarimasu wakatta wakatte wakaranai wakarimashita shiru shitte shiranai shitteru
 aru arimasu atta atte nai nakatta arimasen iru imasu ita ite inai imashita
 oshieru oshiete tsukau tsukaimasu tsukatta tsukatte tsukuru tsukurimasu tsukutta tsukutte
 kaeru kaerimasu kaetta kaette kau kaimasu katta katte matsu machimasu matte yaru yarimasu yatte yatta
@@ -80,7 +80,7 @@ otouto imouto musuko musume tsuma kareshi kouhai joushi buka douryou shachou buc
 isha kangoshi okusan goshujin obaachan ojiichan obasan ojisan akachan
 
 # もの・場所
-keitai sumaho pasokon kaban saifu kagi megane kutsu boushi kasa tokei tsukue tobira kabe yuka tenjou
+keitai sumaho pasokon kaban saifu kagi megane kutsu boushi shatsu kasa tokei tsukue tobira kabe yuka tenjou
 daidokoro genkan niwa kouen ginkou yuubinkyoku toshokan eigakan konbini suupaa depaato kuukou hoteru
 toukyou oosaka kyouto hokkaidou okinawa kyuushuu
 

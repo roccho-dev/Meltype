@@ -9,7 +9,7 @@ project(fcitx5-meltype LANGUAGES CXX)
 find_package(Fcitx5Core 5.0 REQUIRED)
 find_package(Fcitx5Utils 5.0 REQUIRED)
 
-# 本体 (libMeltypeNative.so) と Mozc のヘルパーを入れた場所 (install.sh と同じ)
+# 本体 (libMeltypeNative.so) と Mozc のヘルパーを入れた場所 (build-deb.sh・build-rpm.sh と同じ)
 set(MELTYPE_DIR "/opt/meltype" CACHE PATH "libMeltypeNative.so を入れた場所")
 
 add_library(meltype MODULE meltype.cpp)
@@ -22,7 +22,9 @@ target_compile_definitions(meltype PRIVATE MELTYPE_DIR="${MELTYPE_DIR}")
 target_link_libraries(meltype PRIVATE Fcitx5::Core Fcitx5::Utils ${CMAKE_DL_LIBS})
 
 # テスト (fcitx5 のテスト用のフロントエンドでキーを送り、確定した文字を確かめる)。
-#   cmake -S linux/fcitx5 -B build -DBUILD_TESTING=ON && cmake --build build && MELTYPE_DIR=<libMeltypeNative.so の場所> ctest --test-dir build
+# Native は Mozc ヘルパーを置かないテスト専用ディレクトリに libMeltypeNative.so として用意する。
+#   cmake -S linux/fcitx5 -B build -DBUILD_TESTING=ON -DMELTYPE_DIR=/absolute/path/to/current-native
+#   cmake --build build && cmake -E chdir build ctest --output-on-failure
 option(BUILD_TESTING "テストをビルドする" OFF)
 if(BUILD_TESTING)
     enable_testing()
@@ -38,6 +40,22 @@ if(BUILD_TESTING)
     file(COPY /usr/share/fcitx5/addon/keyboard.conf DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/test/addon)
     get_target_property(FCITX5_CORE_LOCATION Fcitx5::Core LOCATION)
     get_filename_component(FCITX5_LIB_DIR ${FCITX5_CORE_LOCATION} DIRECTORY)
+    add_executable(testpopup test/testpopup.cpp)
+    set_target_properties(testpopup PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.16)
+        set_target_properties(testpopup PROPERTIES CXX_STANDARD 20)
+    endif()
+    target_compile_definitions(testpopup PRIVATE
+        FCITX5_MELTYPE_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+        FCITX5_SYSTEM_ADDON_DIR="${FCITX5_LIB_DIR}/fcitx5")
+    target_link_libraries(testpopup PRIVATE Fcitx5::Core Fcitx5::Utils Fcitx5::Module::TestFrontend)
+    add_dependencies(testpopup meltype)
+    add_test(NAME testpopup-manual COMMAND testpopup manual)
+    add_test(NAME testpopup-spelling COMMAND testpopup spelling)
+    add_test(NAME testpopup-guide-default COMMAND testpopup guide-default)
+    add_test(NAME testpopup-guide-on COMMAND testpopup guide-on)
+
+
     add_executable(testmeltype test/testmeltype.cpp)
     set_target_properties(testmeltype PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     # fcitx5 5.1.16 以降の fcitx-utils/log.h は std::source_location を使うため、C++20 が要る
@@ -50,4 +68,16 @@ if(BUILD_TESTING)
     target_link_libraries(testmeltype PRIVATE Fcitx5::Core Fcitx5::Utils Fcitx5::Module::TestFrontend)
     add_dependencies(testmeltype meltype)
     add_test(NAME testmeltype COMMAND testmeltype)
+
+    add_executable(testterminal test/testterminal.cpp)
+    set_target_properties(testterminal PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    if(Fcitx5Core_VERSION VERSION_GREATER_EQUAL 5.1.16)
+        set_target_properties(testterminal PROPERTIES CXX_STANDARD 20)
+    endif()
+    target_compile_definitions(testterminal PRIVATE
+        FCITX5_MELTYPE_BINARY_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+        FCITX5_SYSTEM_ADDON_DIR="${FCITX5_LIB_DIR}/fcitx5")
+    target_link_libraries(testterminal PRIVATE Fcitx5::Core Fcitx5::Utils Fcitx5::Module::TestFrontend)
+    add_dependencies(testterminal meltype)
+    add_test(NAME testterminal COMMAND testterminal)
 endif()
