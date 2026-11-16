@@ -35,33 +35,29 @@ class UnsafeEffect(RuntimeError):
 
 
 class NativeSession:
-    """Thin binding to Meltype's existing C ABI (same exports as Linux IBus)."""
+    """TTY transport for the same ImeHost event protocol as Linux IBus/fcitx5."""
 
     def __init__(self, library: Path, mozc: Path, proposal_url=None):
         if not library.is_file() or not mozc.is_file():
             raise FileNotFoundError("MeltypeNative.so and Mozc helper must both exist")
         self.lib = ctypes.CDLL(str(library.resolve()))
-        self.lib.meltype_init_mozc.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-        self.lib.meltype_init_mozc.restype = ctypes.c_int
-        self.lib.meltype_create.restype = ctypes.c_void_p
-        self.lib.meltype_destroy.argtypes = [ctypes.c_void_p]
-        self.lib.meltype_handle_key.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p]
-        self.lib.meltype_handle_key.restype = ctypes.c_void_p
-        self.lib.meltype_commit.argtypes = [ctypes.c_void_p]
-        self.lib.meltype_commit.restype = ctypes.c_void_p
+        self.lib.meltype_init.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+        self.lib.meltype_init.restype = ctypes.c_int
+        self.lib.meltype_ime_create.restype = ctypes.c_void_p
+        self.lib.meltype_ime_destroy.argtypes = [ctypes.c_void_p]
+        self.lib.meltype_ime_handle.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        self.lib.meltype_ime_handle.restype = ctypes.c_void_p
         self.lib.meltype_free.argtypes = [ctypes.c_void_p]
-        self.lib.meltype_set_direct.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        self.lib.meltype_set_can_delete.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        self.lib.meltype_set_can_delete.restype = None
-        if self.lib.meltype_init_mozc(os.fsencode(mozc.resolve()), None) != 1:
+        # The current native API takes the app directory and finds its own
+        # mozc/helper there. Never silently use a different --mozc operand.
+        mozc = mozc.resolve()
+        if mozc.name != "meltype_mozc_helper" or mozc.parent.name != "mozc":
+            raise UnsafeEffect("--mozc must name the package's mozc/meltype_mozc_helper")
+        if self.lib.meltype_init(os.fsencode(mozc.parent.parent), None) != 1:
             raise UnsafeEffect("Meltype Mozc could not initialize")
-        self.session = self.lib.meltype_create()
+        self.session = self.lib.meltype_ime_create()
         if not self.session:
             raise UnsafeEffect("Meltype native session unavailable")
-        self.lib.meltype_set_direct(self.session, 0)
-        # The existing main API lets the Core avoid unsupported retroactive
-        # edits. Expect metadata alone is not proof of the child editor's text.
-        self.lib.meltype_set_can_delete(self.session, 0)
         self.preview_session = None
         # The preview thread (#19) and the input path share the Core's Mozc: one call at a time.
         # Direct Input keys never call the Core, so they never wait for this lock.
@@ -88,6 +84,9 @@ class NativeSession:
             except BaseException:
                 self.close()
                 raise
+        # Composition mode is an explicit frontend request; ordinary Direct
+        # Input still forwards keys without calling native code until conversion.
+        self._send(self.session, "JapaneseModeSelected")
 
     def bind_target(self, token):
         self.target = token
@@ -106,7 +105,7 @@ class NativeSession:
             response = self.transport.take()
             if response is None: return None
             generation, text = response
-            return self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode()))
+            return session_result(self._result(self.lib.meltype_proposals_receive(self.proposal, generation, text.encode())))
 
     def _result(self, pointer):
         if not pointer:
@@ -132,14 +131,28 @@ class NativeSession:
         # too. A request already sent cannot be recalled, only made inert.
         if vk == 0x1B and self.transport is not None: self.transport.cancel()
         with self.lock:
-            result = self._result(self.lib.meltype_handle_key(self.session, vk, char, shift, None, None))
+            result = self._key(self.session, vk, char, shift)
         if result.get("view") is None and self.transport is not None: self.transport.cancel()
         return result
 
     def commit(self):
         if self.transport is not None: self.transport.cancel()
         with self.lock:
-            return self._result(self.lib.meltype_commit(self.session))
+            return self._send(self.session, "CommitRequested")
+
+    def _send(self, session, event_type, **fields):
+        # The child owns its text. There is no observed surrounding-text edit
+        # capability, even when its echo happens to equal earlier typed keys.
+        event = {"version": 1, "type": event_type, "instance": "tty",
+                 "field": {"canRemove": False}, **fields}
+        reply = self._result(self.lib.meltype_ime_handle(session, json.dumps(event).encode()))
+        if not isinstance(reply, dict) or reply.get("version") != 1 or not isinstance(reply.get("state"), dict):
+            raise UnsafeEffect("invalid ImeHost protocol response")
+        return session_result(reply.get("result"))
+
+    def _key(self, session, vk, char=0, modifiers=0):
+        return self._send(session, "KeyPressed", key={"vk": vk, "ch": char,
+                          "shift": bool(modifiers & 1), "ctrl": bool(modifiers & 2)})
 
     def preview(self, word):
         with self.lock:
@@ -149,35 +162,34 @@ class NativeSession:
         """The Core's view for an ASCII word, from a second session: the typing session is untouched,
         and the composition is always cancelled, so nothing is committed or learned."""
         if not self.preview_session:
-            self.preview_session = self.lib.meltype_create()
+            self.preview_session = self.lib.meltype_ime_create()
             if not self.preview_session: raise UnsafeEffect("Meltype preview session unavailable")
-            self.lib.meltype_set_direct(self.preview_session, 0)
-            self.lib.meltype_set_can_delete(self.preview_session, 0)
+            self._send(self.preview_session, "JapaneseModeSelected")
         view = None
         try:
             for code in word:
                 key = virtual_key(code)
                 if key is None: return None
-                view = self._result(self.lib.meltype_handle_key(self.preview_session, *key, None, None)).get("view")
+                view = self._key(self.preview_session, *key).get("view")
             # The composition alone is only what Mozc already converted while typing (nihonn stays にほん).
             # A Japanese composition is also converted (Space) for its candidates; an English one is not,
             # since Space would commit it. The Esc below cancels either, so nothing is committed or learned.
             text = (view or {}).get("text") or ""
             if any(ord(ch) > 0x7F for ch in text):
-                converted = self._result(self.lib.meltype_handle_key(self.preview_session, 0x20, 0x20, 0, None, None)).get("view")
+                converted = self._key(self.preview_session, 0x20, 0x20).get("view")
                 if converted and converted.get("candidates"): view = converted
             return view
         finally:
             for _ in range(3):
-                if self._result(self.lib.meltype_handle_key(self.preview_session, 0x1B, 0, 0, None, None)).get("view") is None: break
+                if self._key(self.preview_session, 0x1B).get("view") is None: break
             else:
-                self.lib.meltype_destroy(self.preview_session)
+                self.lib.meltype_ime_destroy(self.preview_session)
                 self.preview_session = None
 
     def close(self):
         with self.lock:  # Waits for a preview query in flight; later ones see no session.
             if self.preview_session:
-                self.lib.meltype_destroy(self.preview_session)
+                self.lib.meltype_ime_destroy(self.preview_session)
                 self.preview_session = None
             self._close()
 
@@ -189,8 +201,39 @@ class NativeSession:
             self.lib.meltype_proposals_destroy(self.proposal)
             self.proposal = None
         if self.session:
-            self.lib.meltype_destroy(self.session)
+            self.lib.meltype_ime_destroy(self.session)
             self.session = None
+
+
+def session_result(value):
+    """Render ImeHost's one candidate list in the TTY's existing panel shape.
+
+    No edit capability is gained by adapting the wire format. Validate every
+    edit before the caller can observe a result or write anything to the PTY.
+    """
+    if not isinstance(value, dict) or type(value.get("consumed")) is not bool or not isinstance(value.get("commits"), list):
+        raise UnsafeEffect("invalid ImeHost SessionResult")
+    edits = []
+    for edit in value["commits"]:
+        if not isinstance(edit, dict) or not isinstance(edit.get("text"), str):
+            raise UnsafeEffect("invalid ImeHost TextEdit")
+        if edit.get("removeBefore") is not None or edit.get("moveCaretBack", 0) != 0:
+            raise UnsafeEffect("surrounding-text edits require an observed editable target")
+        edits.append({"deleteBefore": 0, "text": edit["text"]})
+    view = value.get("view")
+    if view is not None:
+        if not isinstance(view, dict): raise UnsafeEffect("invalid ImeHost view")
+        candidates = view.get("candidates")
+        if candidates is not None and not isinstance(candidates, dict):
+            raise UnsafeEffect("invalid ImeHost candidates")
+        candidates = candidates or {}
+        items = candidates.get("items", [])
+        selected = candidates.get("selected", -1)
+        if not isinstance(items, list) or not all(isinstance(item, str) for item in items) or type(selected) is not int:
+            raise UnsafeEffect("invalid ImeHost candidate list")
+        view = {**view, "candidates": items, "selectedIndex": selected,
+                "notes": candidates.get("notes", []), "meaning": candidates.get("selectedMeaning")}
+    return {"consumed": value["consumed"], "commits": edits, "view": view}
 
 
 def effect_bytes(result, original=b""):
@@ -224,7 +267,7 @@ ARROWS = {b"A": 0x26, b"B": 0x28, b"C": 0x27, b"D": 0x25, b"H": 0x24, b"F": 0x23
 FUNCTIONS = {17: 0x75, 18: 0x76, 19: 0x77, 20: 0x78, 21: 0x79}
 # Ctrl+U/I/P/O while composing: the Core's existing hiragana / katakana / full-width /
 # half-width switch (F6/F7/F9/F10). It takes the letter's virtual key with Control.
-CONTROL = 2  # meltype_handle_key modifiers: Shift = 1, Control = 2
+CONTROL = 2  # NativeSession.key modifiers: Shift = 1, Control = 2
 CTRL_CONVERT = {ord("u"): 0x55, ord("i"): 0x49, ord("p"): 0x50, ord("o"): 0x4F}
 # Legacy Ctrl bytes. 0x09 is also Tab, so Ctrl+I only counts when Kitty keys tell it apart.
 LEGACY_CTRL = {0x15: 0x55, 0x10: 0x50, 0x0F: 0x4F}

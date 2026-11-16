@@ -18,7 +18,7 @@ import tty
 import unittest
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-from meltype_tty import InputBridge,NativeSession,effect_bytes,write_all
+from meltype_tty import InputBridge,NativeSession,effect_bytes,session_result,write_all
 PACKAGE=Path(sys.argv.pop(1)).resolve() if len(sys.argv)>1 else None
 if PACKAGE is None: raise SystemExit('same-build Meltype-linux directory required')
 
@@ -46,7 +46,7 @@ class NativeProposalProof(unittest.TestCase):
         return {'id':id,'representation':text,'meaning':{'kind':'text','value':id},'evidence':['source',id]}
     def response(self,q,candidates=None,body=None):
         body=json.dumps({**q,'proposals':candidates or []},ensure_ascii=False) if body is None else body
-        result=self.native._result(self.native.lib.meltype_proposals_receive(self.native.proposal,q['generation'],body.encode()))
+        result=session_result(self.native._result(self.native.lib.meltype_proposals_receive(self.native.proposal,q['generation'],body.encode())))
         self.assertEqual(effect_bytes(result),b'')
         self.bridge.view=result['view']
     def send(self,raw):

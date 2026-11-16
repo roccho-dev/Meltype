@@ -240,7 +240,7 @@ class NativeProof(unittest.TestCase):
         before = candidates()
         results, original = [], self.native._result
         def spy(pointer):
-            result = original(pointer); results.append(result); return result
+            result = original(pointer); results.append(result.get('result', result)); return result
         self.native._result = spy
         try:
             for _ in range(3): propose(self.query('kawa'))
@@ -255,10 +255,9 @@ class NativeProof(unittest.TestCase):
         lib, native = self.native.lib, self.native
         def handle(vk, char=0, shift=0):
             if not native.preview_session:
-                native.preview_session = lib.meltype_create()
-                lib.meltype_set_direct(native.preview_session, 0)
-                lib.meltype_set_can_delete(native.preview_session, 0)
-            return native._result(lib.meltype_handle_key(native.preview_session, vk, char, shift, None, None))
+                native.preview_session = lib.meltype_ime_create()
+                native._send(native.preview_session, 'JapaneseModeSelected')
+            return native._key(native.preview_session, vk, char, shift)
         def compose(word):
             view = None
             for code in word.encode(): view = handle(*m.virtual_key(code)).get('view')

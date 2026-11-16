@@ -10,38 +10,39 @@ namespace Meltype.Tests;
 internal static class DirectTtySessionTests
 {
     [Test]
-    public static void Notes_AreSinglePositionedAndEscaped()
+    public static void CandidatesAndNotes_ArePositionedAndEscaped()
     {
-        const string note = "根拠: \"引用\"\\path\n次行\t\u0001";
-        var view = new CompositionView("x", ["A", "B"], 1, true, "h", Notes: [null, note]);
+        const string candidate = "候補: \"引用\"\\path\n次行\t\u0001";
+        var view = new CompositionView("x", ["A", candidate], 1, true, "h", Notes: [CandidateNote.None, CandidateNote.Translation]);
         using var document = JsonDocument.Parse(new SessionResult(true, [], view).ToJson());
-        var serialized = document.RootElement.GetProperty("view");
+        var serialized = document.RootElement.GetProperty("view").GetProperty("candidates");
         Assert.Equal(1, serialized.EnumerateObject().Count(p => p.Name == "notes"));
         var notes = serialized.GetProperty("notes");
         Assert.Equal(2, notes.GetArrayLength());
         Assert.True(notes[0].ValueKind == JsonValueKind.Null, "null retains its candidate position");
-        Assert.Equal(note, notes[1].GetString());
-        Assert.Equal(1, serialized.GetProperty("selectedIndex").GetInt32());
+        Assert.Equal("英訳", notes[1].GetString());
+        Assert.Equal(candidate, serialized.GetProperty("items")[1].GetString());
+        Assert.Equal(1, serialized.GetProperty("selected").GetInt32());
         Assert.Equal(0, document.RootElement.GetProperty("commits").GetArrayLength());
     }
 
     [Test]
     public static void Notes_UseMainCandidateCountWithoutDuplicateWire()
     {
-        // The adopted main always emits one note slot per candidate. Preserve
-        // B's missing/empty/order checks under that wire, not the older omission.
-        IReadOnlyList<string?>?[] cases = [null, [], ["one"], ["one", null, "outside"]];
+        // The shared view contract requires notes to match the candidate count.
+        IReadOnlyList<CandidateNote>?[] cases = [null, [CandidateNote.None, CandidateNote.None],
+            [CandidateNote.HalfWidth, CandidateNote.Translation]];
         foreach (var source in cases)
         {
             var view = new CompositionView("x", ["A", "B"], 0, true, "h", Notes: source);
             using var document = JsonDocument.Parse(new SessionResult(true, [], view).ToJson());
-            var result = document.RootElement.GetProperty("view");
+            var result = document.RootElement.GetProperty("view").GetProperty("candidates");
             Assert.Equal(1, result.EnumerateObject().Count(p => p.Name == "notes"));
             var notes = result.GetProperty("notes");
             Assert.Equal(view.Candidates.Count, notes.GetArrayLength());
             for (var i = 0; i < view.Candidates.Count; i++)
             {
-                if (source?.ElementAtOrDefault(i) is { } expected) Assert.Equal(expected, notes[i].GetString());
+                if (source?[i].ToDisplayText() is { } expected) Assert.Equal(expected, notes[i].GetString());
                 else Assert.True(notes[i].ValueKind == JsonValueKind.Null, "missing note must be null");
             }
         }
@@ -53,8 +54,7 @@ internal static class DirectTtySessionTests
         var result = new SessionResult(true, [new TextEdit(2, "交換", "日本")], null);
         using var document = JsonDocument.Parse(result.ToJson());
         var edit = document.RootElement.GetProperty("commits")[0];
-        Assert.Equal("日本", edit.GetProperty("expect").GetString());
-        Assert.Equal(2, edit.GetProperty("deleteBefore").GetInt32());
+        Assert.Equal("日本", edit.GetProperty("removeBefore").GetString());
         Assert.Equal("交換", edit.GetProperty("text").GetString());
         // Actual TTY rejection of this unsupported effect is tested separately.
     }
@@ -63,7 +63,7 @@ internal static class DirectTtySessionTests
     public static void SnapshotNeverReplaysCommitOrChangesDeleteCapability()
     {
         var session = new MeltypeSession(CompositionTests.Detector, new CompositionTests.FakeConverter(),
-            new CompositionOptions(), () => new Settings());
+            new CompositionServices(), () => new Settings());
         session.CanDeleteSurrounding = false;
         session.AttachProposals(null);
         session.HandleKey('A', 'a', false, false, false, false);
