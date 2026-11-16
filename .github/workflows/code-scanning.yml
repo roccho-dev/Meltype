@@ -15,9 +15,10 @@ concurrency:
   group: code-scanning-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
+# 上流の公開・bot は上流だけで実行する。fork の配布は fork-* の経路で扱う。
 jobs:
   summary:
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    if: github.repository == 'yksr-melt/Meltype' && (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

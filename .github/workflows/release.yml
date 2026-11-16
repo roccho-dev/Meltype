@@ -21,19 +21,23 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# 上流の公開・bot は上流だけで実行する。fork の配布は fork-* の経路で扱う。
 jobs:
   windows:
+    if: github.repository == 'yksr-melt/Meltype'
     uses: ./.github/workflows/windows.yml
     secrets: inherit
   mac:
+    if: github.repository == 'yksr-melt/Meltype'
     uses: ./.github/workflows/mac.yml
     secrets: inherit
   linux:
+    if: github.repository == 'yksr-melt/Meltype'
     uses: ./.github/workflows/linux.yml
     secrets: inherit
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'yksr-melt/Meltype' && (startsWith(github.ref, 'refs/tags/v'))
     needs: [windows, mac, linux]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -56,7 +60,7 @@ jobs:
           fail_on_unmatched_files: true
 
   winget:
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    if: github.repository == 'yksr-melt/Meltype' && (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-'))
     needs: publish
     uses: ./.github/workflows/winget.yml
     with:
@@ -65,7 +69,7 @@ jobs:
 
   # Homebrew の cask をこのリリースの zip の SHA-256 で作る (#863)。同じリポジトリを tap として使い、Casks/ に更新する。
   homebrew:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'yksr-melt/Meltype' && (startsWith(github.ref, 'refs/tags/v'))
     needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -137,7 +141,7 @@ jobs:
   # apt と dnf のリポジトリを同じ鍵で署名して、1 つの GitHub Pages の成果物にする
   # (Pages は deploy のたびにサイト全体を置き換えるので、別々のジョブで deploy すると片方が消える)
   build-repositories:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'yksr-melt/Meltype' && (startsWith(github.ref, 'refs/tags/v'))
     needs: publish
     runs-on: ubuntu-24.04
     outputs:
@@ -196,7 +200,7 @@ jobs:
           path: ${{ runner.temp }}/meltype-pages
 
   publish-repositories:
-    if: startsWith(github.ref, 'refs/tags/v') && needs.build-repositories.outputs.ready == 'true'
+    if: github.repository == 'yksr-melt/Meltype' && (startsWith(github.ref, 'refs/tags/v') && needs.build-repositories.outputs.ready == 'true')
     needs: build-repositories
     runs-on: ubuntu-24.04
     concurrency:

@@ -68,7 +68,7 @@ jobs:
       # 配布用の署名 (Apple Developer Program の Developer ID の証明書があるときだけ。公証に時間がかかるので Pull Request ではしない)。秘密:
       #   MAC_CERT_P12_BASE64 (証明書の .p12 を Base64 にしたもの)、MAC_CERT_PASSWORD、MAC_IDENTITY ("Developer ID Application: 名前 (チームID)")
       - name: Signing certificate
-        if: github.event_name != 'pull_request'
+        if: github.repository == 'yksr-melt/Meltype' && github.event_name != 'pull_request'
         env:
           MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
           MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
@@ -96,7 +96,7 @@ jobs:
           python3 tools/test-mac-events.py mac/build/Meltype.app/Contents/Frameworks/libMeltypeNative.dylib
       # 公証 (notarization): 署名したときだけ。秘密 NOTARY_APPLE_ID・NOTARY_TEAM_ID・NOTARY_PASSWORD (App 用パスワード)
       - name: Notarize
-        if: env.MELTYPE_MAC_IDENTITY != ''
+        if: github.repository == 'yksr-melt/Meltype' && env.MELTYPE_MAC_IDENTITY != ''
         env:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}

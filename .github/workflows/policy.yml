@@ -15,9 +15,10 @@ on:
 
 permissions: {}
 
+# 上流の公開・bot は上流だけで実行する。fork の配布は fork-* の経路で扱う。
 jobs:
   enforce:
-    if: github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot'
+    if: github.repository == 'yksr-melt/Meltype' && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -39,7 +40,7 @@ jobs:
 
   # 閉じる Issue の担当でない人の PR を Draft にする。開いているすべての PR を確かめる
   assignee:
-    if: contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name)
+    if: github.repository == 'yksr-melt/Meltype' && (contains(fromJSON('["schedule","workflow_dispatch"]'), github.event_name))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:

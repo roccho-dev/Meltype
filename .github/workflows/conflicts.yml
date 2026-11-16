@@ -19,8 +19,10 @@ concurrency:
   group: conflicts
   cancel-in-progress: false
 
+# 上流の公開・bot は上流だけで実行する。fork の配布は fork-* の経路で扱う。
 jobs:
   check:
+    if: github.repository == 'yksr-melt/Meltype'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
