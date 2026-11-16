@@ -1,44 +1,58 @@
-# upstream (yksr-melt/Meltype) のファイルのうち、この fork が変えた・消したもの。.github/workflows/fork-surface.yml が確かめる。
-# ここに無い upstream のファイルは変えない・消さない。足したファイルは書かない。
-# 一覧は減らす方向にだけ変える (消したファイルを戻す・workflow を disable する、などの PR で)。
+# .github/upstream-base.json に固定した上流のファイルのうち、この fork が変更・削除したもの。
+# .github/workflows/fork-surface.yml が、一覧にない差分と、不要になった一覧の行を検査する。
+# fork で追加した拡張ファイルは書かない。上流追従で移動・分割された接点は、新しい固定 commit に対して見直す。
+# 更新時は必要な差分の理由を独立レビューで確かめる。使わなくなった接点は一覧と実装の両方から除く。
 .github/ISSUE_TEMPLATE/config.yml
 .github/PULL_REQUEST_TEMPLATE.md
 .github/bot/cla.mjs
 .github/bot/meltype-bot.mjs
 .github/bot/notices.mjs
 .github/bot/sponsors.mjs
+.github/dependabot.yml
 .github/workflows/bot.yml
 .github/workflows/cla.yml
+.github/workflows/code-scanning.yml
+.github/workflows/conflicts.yml
 .github/workflows/dotnet-update.yml
-.github/workflows/notices.yml
-.github/workflows/pr-checks.yml
+.github/workflows/mac.yml
+.github/workflows/policy.yml
+.github/workflows/release.yml
 .github/workflows/sponsors.yml
 .github/workflows/winget.yml
-Build-Package.ps1
+.mergify.yml
 CONTRIBUTING.md
 README.md
 SECURITY.md
-docs/RELEASE.md
+docs/dev/DEVELOPMENT.md
+docs/dev/RELEASE.md
 docs/images/headings/contributing/03.svg
 docs/images/headings/contributing/05.svg
 docs/images/headings/contributing/s06.svg
-docs/images/headings/release/04.svg
+linux/README.md
 linux/build.sh
 linux/ibus-engine-meltype
 linux/meltype.xml
-packaging/Find-InnoSetup.ps1
-packaging/Meltype.iss
-packaging/README.txt
-packaging/install.ps1
 packaging/setup-ime.ps1
 packaging/update.ps1
+src/Meltype.Core.Tests/ReleaseNotesTests.cs
+src/Meltype.Core/Composition/CompositionController.Keys.cs
+src/Meltype.Core/Composition/CompositionController.View.cs
 src/Meltype.Core/Composition/CompositionController.cs
+src/Meltype.Core/Composition/CompositionOutput.cs
 src/Meltype.Core/Composition/MeltypeSession.cs
 src/Meltype.Core/Config/ProjectInfo.cs
-src/Meltype/AppInfo.cs
-src/Meltype/Meltype.csproj
-src/Meltype/UI/TrayApplicationContext.cs
-src/Meltype/Updater.cs
+src/Meltype.Core/Ime/ImeHost.cs
+src/Meltype.Core/Ime/ImeSession.cs
+src/Meltype.Core/Meltype.Core.csproj
+src/Meltype.Windows.Tests/WindowsTests.cs
+src/Meltype.Windows/AppInfo.cs
+src/Meltype.Windows/Composition/CompositionWindow.cs
+src/Meltype.Windows/Keyboard/KeyboardFront.cs
+src/Meltype.Windows/Meltype.Windows.csproj
+src/Meltype.Windows/SelfTest.cs
+src/Meltype.Windows/Startup.cs
+src/Meltype.Windows/UI/TrayApplicationContext.cs
+src/Meltype.Windows/Updater.cs
 tools/Test-SetupIme.ps1
 tools/make-manifests.mjs
 tools/report-form/Code.gs

@@ -5,6 +5,7 @@
 Usage: python3 tty/tests/native_tty.py /absolute/Meltype-linux
 Missing real artifacts fail; they are not skipped or replaced with test doubles.
 """
+import ctypes
 import hashlib
 import json
 import os
@@ -240,7 +241,7 @@ class NativeProof(unittest.TestCase):
         before = candidates()
         results, original = [], self.native._result
         def spy(pointer):
-            result = original(pointer); results.append(result); return result
+            result = original(pointer); results.append(result.get('result', result)); return result
         self.native._result = spy
         try:
             for _ in range(3): propose(self.query('kawa'))
@@ -255,10 +256,9 @@ class NativeProof(unittest.TestCase):
         lib, native = self.native.lib, self.native
         def handle(vk, char=0, shift=0):
             if not native.preview_session:
-                native.preview_session = lib.meltype_create()
-                lib.meltype_set_direct(native.preview_session, 0)
-                lib.meltype_set_can_delete(native.preview_session, 0)
-            return native._result(lib.meltype_handle_key(native.preview_session, vk, char, shift, None, None))
+                native.preview_session = lib.meltype_ime_create()
+                native._send(native.preview_session, 'JapaneseModeSelected')
+            return native._key(native.preview_session, vk, char, shift)
         def compose(word):
             view = None
             for code in word.encode(): view = handle(*m.virtual_key(code)).get('view')
@@ -360,7 +360,13 @@ if __name__=='__main__':
             for key in ['HOME','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']:
                 os.environ[key]=str(Path(home)/key.lower())
                 Path(os.environ[key]).mkdir()
-            result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProof(case)]))
+            try:
+                result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([NativeProof(case)]))
+            finally:
+                # Converter warmup/learning owns files in this data scope. Stop
+                # the process runtime before TemporaryDirectory removes them.
+                shutdown=ctypes.CDLL(str(LIBRARY)).meltype_shutdown
+                shutdown.argtypes=[]; shutdown.restype=None; shutdown()
             sys.exit(0 if result.wasSuccessful() else 1)
     started=time.monotonic()
     failures=[]

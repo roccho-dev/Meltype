@@ -5,14 +5,17 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Meltype.Composition;
+using Meltype.Ime;
 
 namespace Meltype.Mac;
 
 public static unsafe class ProposalExports
 {
-    private sealed class Exchange(MeltypeSession session) : IProposalPort
+    private const string Instance = "tty";
+
+    private sealed class Exchange(ImeHost host) : IProposalPort
     {
-        public MeltypeSession Session { get; } = session;
+        public ImeHost Host { get; } = host;
         public ProposalQuery? Pending;
         public ProposalQuery? Current;
         public ProposalSelection? Selection;
@@ -142,9 +145,9 @@ public static unsafe class ProposalExports
     {
         try
         {
-            if (sessionHandle == IntPtr.Zero || GCHandle.FromIntPtr(sessionHandle).Target is not MeltypeSession session) return IntPtr.Zero;
-            var exchange = new Exchange(session);
-            session.AttachProposals(exchange);
+            if (sessionHandle == IntPtr.Zero || GCHandle.FromIntPtr(sessionHandle).Target is not ImeHost host) return IntPtr.Zero;
+            var exchange = new Exchange(host);
+            host.AttachProposals(Instance, exchange);
             return GCHandle.ToIntPtr(GCHandle.Alloc(exchange));
         }
         catch { return IntPtr.Zero; }
@@ -154,7 +157,7 @@ public static unsafe class ProposalExports
     public static void Destroy(IntPtr handle)
     {
         if (Get(handle) is not { } exchange) return;
-        exchange.Session.AttachProposals(null);
+        exchange.Host.DetachProposals(Instance, exchange);
         GCHandle.FromIntPtr(handle).Free();
     }
 
@@ -169,7 +172,8 @@ public static unsafe class ProposalExports
     {
         if (Get(handle) is not { } exchange || exchange.Pending is not { } query) return null;
         exchange.Pending = null;
-        return Text(Json(w => {
+        return Text(Json(w =>
+        {
             w.WriteStartObject(); w.WriteNumber("generation", query.Generation);
             w.WriteString("raw", query.Raw); w.WriteEndObject();
         }));
@@ -183,7 +187,7 @@ public static unsafe class ProposalExports
             if (Get(handle) is not { } exchange) return null;
             var value = Marshal.PtrToStringUTF8((IntPtr)json) ?? "";
             exchange.Receive(generation, value.Length <= 1024 * 1024 ? value : "");
-            return Text(exchange.Session.ProposalView().ToJson());
+            return Text(exchange.Host.ProposalView(Instance).ToJson());
         }
         catch { return null; }
     }
@@ -193,7 +197,8 @@ public static unsafe class ProposalExports
     {
         if (Get(handle) is not { } exchange || exchange.Selection is not { } selection) return null;
         exchange.Selection = null;
-        return Text(Json(w => {
+        return Text(Json(w =>
+        {
             w.WriteStartObject(); w.WriteNumber("generation", selection.Generation); w.WriteString("raw", selection.Raw);
             w.WritePropertyName("proposal"); w.WriteStartObject();
             w.WriteString("id", selection.Candidate.Id); w.WriteString("representation", selection.Candidate.Representation);

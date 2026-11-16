@@ -44,7 +44,7 @@ public sealed class RomajiDetector
         ("にゃ", ["nya"]), ("にゅ", ["nyu"]), ("にょ", ["nyo"]), ("にぃ", ["nyi"]), ("にぇ", ["nye"]),
         ("は", ["ha"]), ("ひ", ["hi"]), ("ふ", ["fu", "hu"]), ("へ", ["he"]), ("ほ", ["ho"]),
         ("ひゃ", ["hya"]), ("ひゅ", ["hyu"]), ("ひょ", ["hyo"]),
-        ("ふぁ", ["fa"]), ("ふぃ", ["fi", "fyi"]), ("ふぇ", ["fe", "fye"]), ("ふぉ", ["fo"]),
+        ("ふぁ", ["fa", "hwa"]), ("ふぃ", ["fi", "fyi", "hwi"]), ("ふぇ", ["fe", "fye", "hwe"]), ("ふぉ", ["fo", "hwo"]),
         ("ふゃ", ["fya"]), ("ふゅ", ["fyu"]), ("ふょ", ["fyo"]),
         ("ま", ["ma"]), ("み", ["mi"]), ("む", ["mu"]), ("め", ["me"]), ("も", ["mo"]),
         ("みゃ", ["mya"]), ("みゅ", ["myu"]), ("みょ", ["myo"]),
@@ -65,13 +65,17 @@ public sealed class RomajiDetector
         ("びゃ", ["bya"]), ("びゅ", ["byu"]), ("びょ", ["byo"]),
         ("ぱ", ["pa"]), ("ぴ", ["pi"]), ("ぷ", ["pu"]), ("ぺ", ["pe"]), ("ぽ", ["po"]),
         ("ぴゃ", ["pya"]), ("ぴゅ", ["pyu"]), ("ぴょ", ["pyo"]),
-        ("とぁ", ["twa"]), ("とぃ", ["twi"]), ("とぇ", ["twe"]), ("とぅ", ["twu"]),
-        ("どぁ", ["dwa"]), ("どぃ", ["dwi"]), ("どぇ", ["dwe"]), ("どぅ", ["dwu"]),
-        // Mozc のローマ字入力表にある拗音・外来音の綴り (issue #674)。英語の語の中に出る綴りは足さない: *yi (trying・studying・babying)、hw* (highway・pathway・northwest)、hye (hyena)、sw* (swan・swine)、two・bye・dye・rye、v 系、wo で終わる綴り (ping|wo)
-        ("きぇ", ["kye"]), ("ぎぇ", ["gye"]), ("ぴぇ", ["pye"]), ("みぇ", ["mye"]),
-        ("くぃ", ["kwi"]), ("くぅ", ["kwu"]), ("くぇ", ["kwe"]),
-        ("ぐぃ", ["gwi"]), ("ぐぅ", ["gwu"]), ("ぐぇ", ["gwe"]),
-        ("ずぁ", ["zwa"]), ("ずぃ", ["zwi"]), ("ずぅ", ["zwu"]), ("ずぇ", ["zwe"]),
+        ("とぁ", ["twa"]), ("とぃ", ["twi"]), ("とぇ", ["twe"]), ("とぅ", ["twu"]), ("とぉ", ["two"]),
+        ("どぁ", ["dwa"]), ("どぃ", ["dwi"]), ("どぇ", ["dwe"]), ("どぅ", ["dwu"]), ("どぉ", ["dwo"]),
+        // Mozc のローマ字入力表にある拗音・外来音の綴り (issue #674)
+        ("きぃ", ["kyi"]), ("きぇ", ["kye"]), ("ぎぃ", ["gyi"]), ("ぎぇ", ["gye"]),
+        ("しぃ", ["syi"]), ("じぃ", ["zyi", "jyi"]), ("ぢぃ", ["dyi"]), ("ぢぇ", ["dye"]),
+        ("ひぃ", ["hyi"]), ("ひぇ", ["hye"]), ("びぃ", ["byi"]), ("びぇ", ["bye"]), ("ぴぃ", ["pyi"]), ("ぴぇ", ["pye"]),
+        ("みぃ", ["myi"]), ("みぇ", ["mye"]), ("りぃ", ["ryi"]), ("りぇ", ["rye"]),
+        ("くぃ", ["kwi"]), ("くぅ", ["kwu"]), ("くぇ", ["kwe"]), ("くぉ", ["kwo"]),
+        ("ぐぃ", ["gwi"]), ("ぐぅ", ["gwu"]), ("ぐぇ", ["gwe"]), ("ぐぉ", ["gwo"]),
+        ("すぁ", ["swa"]), ("すぃ", ["swi"]), ("すぅ", ["swu"]), ("すぇ", ["swe"]), ("すぉ", ["swo"]),
+        ("ずぁ", ["zwa"]), ("ずぃ", ["zwi"]), ("ずぅ", ["zwu"]), ("ずぇ", ["zwe"]), ("ずぉ", ["zwo"]),
     ];
 
     // 英語の綴りにほぼ現れない拗音 (sha/cha/ja は shut, chat, jam などで普通に出るので除外)。
@@ -228,7 +232,7 @@ public sealed class RomajiDetector
     private readonly ConcurrentDictionary<string, RomajiAnalysis> _looseCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, RomajiAnalysis> _compositionCache = new(StringComparer.Ordinal);
 
-    private RomajiAnalysis AnalyzeCore(string letters, bool strictStart, bool composition)
+    private RomajiAnalysis AnalyzeCore(string letters, bool strictStart, bool composition, bool allowCustomWait = true)
     {
         var tokens = new List<RomajiToken>();
         int strongYouon = 0, tsu = 0, sokuon = 0, longVowels = 0;
@@ -253,7 +257,12 @@ public sealed class RomajiDetector
 
             if (c == 'n' && i + 1 < s.Length && (s[i + 1] == 'n' || (IsConsonant(s[i + 1]) && s[i + 1] != 'y')))
             {
+                // ユーザーの表の綴りの打ちかけ (ngh の ng) なら、「ん」と読まずに続きを待つ (issue #979)。
+                // 組み込みの綴りとして完成している語 (ka など) は待たない。対象は ん・っ だけ。
+                // 語頭の「ん」をはじく確認 (strictStart) は待つ処理より先。表を登録していても語頭の ng ははじく (issue #979 レビュー)
                 if (i == 0 && strictStart) return Invalid("語頭の「ん」");
+                if (allowCustomWait && _custom is not null && CustomPrefixTail(s, i) is { } nWaiting)
+                    return new RomajiAnalysis(true, tokens.ToArray(), nWaiting, null, strongYouon, tsu, sokuon, longVowels);
                 var consumed = 1;
                 if (s[i + 1] == 'n' && (composition || i + 2 >= s.Length || !(IsVowel(s[i + 2]) || s[i + 2] == 'y'))) consumed = 2;
                 tokens.Add(new RomajiToken(s.Substring(i, consumed), "ん"));
@@ -264,7 +273,11 @@ public sealed class RomajiDetector
             if (i + 1 < s.Length && IsConsonant(c) && c != 'n' &&
                 (s[i + 1] == c || (c == 't' && s[i + 1] == 'c' && i + 2 < s.Length && s[i + 2] == 'h')))
             {
+                // ユーザーの表の綴りの打ちかけ (kkq の kk) なら、「っ」と読まずに続きを待つ (issue #979)
+                // 語頭の「っ」をはじく確認 (strictStart) は待つ処理より先。表を登録していても語頭の kk ははじく (issue #979 レビュー)
                 if (i == 0 && strictStart) return Invalid("語頭の「っ」");
+                if (allowCustomWait && _custom is not null && CustomPrefixTail(s, i) is { } sWaiting)
+                    return new RomajiAnalysis(true, tokens.ToArray(), sWaiting, null, strongYouon, tsu, sokuon, longVowels);
                 tokens.Add(new RomajiToken(c.ToString(), "っ"));
                 sokuon++;
                 i += 1;
@@ -298,6 +311,13 @@ public sealed class RomajiDetector
         return new RomajiAnalysis(true, tokens.ToArray(), "", null, strongYouon, tsu, sokuon, longVowels);
     }
 
+    /// <summary>s の i から末尾までが、ユーザーの表の綴りの打ちかけ (厳密な前置詞で、それ自体は綴りでない) ならその部分。無ければ null。</summary>
+    private string? CustomPrefixTail(string s, int i)
+    {
+        var rest = s[i..];
+        return rest.Length < _customMaxLength && _customPartials.Contains(rest) && !_custom!.ContainsKey(rest) ? rest : null;
+    }
+
     /// <summary>s の i から始まる、ユーザーの表のいちばん長い綴り。無ければ null。</summary>
     private RomajiToken? MatchCustom(string s, int i)
     {
@@ -324,7 +344,26 @@ public sealed class RomajiDetector
             foreach (var token in analysis.Tokens) builder.Append(token.Kana);
             if (analysis.IsValid)
             {
-                builder.Append(final && analysis.Partial == "n" ? "ん" : analysis.Partial);
+                var partial = analysis.Partial;
+                // 確定のときは、ユーザーの表の綴りの打ちかけを待たずに組み込みの読みに戻す (ng → んg)
+                if (final && _custom is not null && partial.Length > 0
+                    && partial.Length < _customMaxLength && _customPartials.Contains(partial) && !_custom.ContainsKey(partial))
+                {
+                    var settled = AnalyzeCore(partial, strictStart: false, composition: true, allowCustomWait: false);
+                    builder.Append(settled.Kana);
+                    if (settled.IsValid)
+                    {
+                        builder.Append(settled.Partial == "n" ? "ん" : settled.Partial);
+                    }
+                    else
+                    {
+                        // 再解析で読めなかった文字は捨てずに残す (ngh → んgh、kkq → っkq)
+                        var unread = settled.Tokens.Sum(t => t.Romaji.Length);
+                        builder.Append(partial[unread..]);
+                    }
+                    break;
+                }
+                builder.Append(final && partial == "n" ? "ん" : partial);
                 break;
             }
             var consumed = analysis.Tokens.Sum(t => t.Romaji.Length);

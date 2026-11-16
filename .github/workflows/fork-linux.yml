@@ -3,10 +3,18 @@ name: fork-linux
 # この fork の Linux 版。upstream の linux.yml は upstream の版のまま置き、この fork では Actions の設定で止める
 # (gh workflow disable linux.yml)。
 # Linux 版 (linux/、IBus) をビルドして、テスター向けの zip を実行結果 (Artifacts) に置く。
-# Actions の画面から手動で実行するか、Linux 版・Mozc のヘルパー・共通部分を変えて push したとき。タグ (v*) ならリリースにも添付する。
+# PR・手動実行・source 更新で候補を検証する。公開は fork-publish.yml が同じ検証済み bytes を使う。
 # Mozc のビルドは初回 30〜40 分かかるので、Bazel の結果をキャッシュして次から速くする。
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'linux/**'
+      - 'native/**'
+      - 'src/**'
+      - 'dictionaries/**'
+      - 'tools/**'
+      - '.github/workflows/fork-linux.yml'
   push:
     branches: ['**']
     tags: ['v*']
@@ -30,10 +38,9 @@ jobs:
   app:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # タグ時の softprops/action-gh-release 用。permissions は式が使えないため常に write。
-    # id-token / attestations は Linux zip の出自の証明 (actions/attest-build-provenance) 用。
+    # 候補検証には公開権限を持たせない。PR では attestation も作らない。
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     env:
@@ -97,15 +104,10 @@ jobs:
           python3 linux/build/Meltype-linux/tty/tests/native_proposals.py "$PWD/linux/build/Meltype-linux"
       - name: Package
         run: |
-          # タグ (v1.0.0) なら Meltype-1.0.0-linux.zip、それ以外はテスト版の名前
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then name="Meltype-${GITHUB_REF_NAME#v}-linux.zip"; else name="Meltype-linux-test-$(date +%Y%m%d-%H%M).zip"; fi
+          version="$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("src/Meltype.Core/Meltype.Core.csproj").findtext(".//Version"))')"
+          name="Meltype-${version}-linux.zip"
           (cd linux/build && zip -qr "$name" Meltype-linux)
           ls -la linux/build
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: meltype-linux
-          path: linux/build/Meltype-*.zip
-          retention-days: 14
       - name: Require real KVM for bcon test
         run: test -c /dev/kvm
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24
@@ -134,10 +136,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       # この fork の GitHub Actions でビルドしたことの証明 (gh attestation verify <zip> --repo roccho-dev/Meltype で確かめられる)
+      - name: Bind source and tested artifact bytes
+        run: |
+          version="$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("src/Meltype.Core/Meltype.Core.csproj").findtext(".//Version"))')"
+          python3 tools/candidate_manifest.py create --manifest linux/build/linux-candidate.json --directory linux/build \
+            --repository "$GITHUB_REPOSITORY" --commit "$(git rev-parse HEAD)" --version "$version" --kind linux
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name != 'pull_request'
         with:
           subject-path: linux/build/Meltype-*.zip
-      - if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          files: linux/build/Meltype-*.zip
+          name: meltype-linux-candidate
+          path: |
+            linux/build/Meltype-*.zip
+            linux/build/linux-candidate.json
+          retention-days: 30

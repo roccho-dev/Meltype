@@ -1,0 +1,117 @@
+# 公開済みのtagと、成功した候補runのartifact IDを明示して同じbytesを昇格する。ここでは再ビルドしない。
+name: fork-publish-tested-candidate
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 検証したsource commitに付けた既存のタグ
+        required: true
+      source_commit:
+        description: 候補を検証した40桁のsource commit
+        required: true
+      windows_run:
+        description: fork-buildの成功したpushまたは手動実行run ID
+        required: true
+      windows_artifact:
+        description: そのrunのmeltype-windows-candidate artifact ID
+        required: true
+      linux_run:
+        description: fork-linuxの成功したpushまたは手動実行run ID
+        required: true
+      linux_artifact:
+        description: そのrunのmeltype-linux-candidate artifact ID
+        required: true
+      prerelease:
+        description: プレリリースとして公開する
+        type: boolean
+        default: true
+      make_latest:
+        description: 検証済みの正式版をlatestにする（prereleaseとは併用不可）
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: fork-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: github.repository == 'roccho-dev/Meltype'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      WINDOWS_RUN: ${{ inputs.windows_run }}
+      WINDOWS_ARTIFACT: ${{ inputs.windows_artifact }}
+      LINUX_RUN: ${{ inputs.linux_run }}
+      LINUX_ARTIFACT: ${{ inputs.linux_artifact }}
+      IS_PRERELEASE: ${{ inputs.prerelease }}
+      MAKE_LATEST: ${{ inputs.make_latest }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Verify source and provider candidate identities
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          [[ "$WINDOWS_RUN" =~ ^[0-9]+$ && "$WINDOWS_ARTIFACT" =~ ^[0-9]+$ && "$LINUX_RUN" =~ ^[0-9]+$ && "$LINUX_ARTIFACT" =~ ^[0-9]+$ ]]
+          version="$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("src/Meltype.Core/Meltype.Core.csproj").findtext(".//Version"))')"
+          test "$RELEASE_TAG" = "v$version"
+          if [[ "$IS_PRERELEASE" == true && "$MAKE_LATEST" == true ]]; then echo 'prerelease cannot be latest' >&2; exit 1; fi
+          echo "CANDIDATE_VERSION=$version" >> "$GITHUB_ENV"
+          mkdir -p provider dist
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$WINDOWS_RUN" > provider/windows-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$WINDOWS_ARTIFACT" > provider/windows-artifact.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_RUN" > provider/linux-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$LINUX_ARTIFACT" > provider/linux-artifact.json
+          for platform in windows linux; do
+            python3 tools/candidate_manifest.py provider --repository "$GITHUB_REPOSITORY" \
+              --commit "$EXPECTED_COMMIT" --version "$version" --kind "$platform" \
+              --provider-run "provider/$platform-run.json" --provider-artifact "provider/$platform-artifact.json"
+          done
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          artifact-ids: ${{ inputs.windows_artifact }}
+          run-id: ${{ inputs.windows_run }}
+          github-token: ${{ github.token }}
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          artifact-ids: ${{ inputs.linux_artifact }}
+          run-id: ${{ inputs.linux_run }}
+          github-token: ${{ github.token }}
+          path: dist
+          merge-multiple: true
+      - name: Verify tested bytes and build provenance
+        run: |
+          set -euo pipefail
+          python3 tools/candidate_manifest.py bundle --directory dist --repository "$GITHUB_REPOSITORY" \
+            --commit "$EXPECTED_COMMIT" --version "$CANDIDATE_VERSION" > dist/verified-files.txt
+          while IFS= read -r file; do
+            if [[ "$file" == *.zip ]]; then gh attestation verify "dist/$file" --repo "$GITHUB_REPOSITORY"; fi
+          done < dist/verified-files.txt
+          python3 -c 'import json; from pathlib import Path; w=json.loads(Path("dist/windows-candidate.json").read_text()); Path("dist/promotion-notes.md").write_text("検証済み候補の同じ成果物を公開します。"+chr(10)*2+"source: `"+w["sourceCommit"]+"`"+chr(10), encoding="utf-8")'
+      - name: Publish selected candidate once
+        run: |
+          set -euo pipefail
+          state="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$EXPECTED_COMMIT" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
+          flags=("--prerelease=$IS_PRERELEASE" "--latest=$MAKE_LATEST")
+          mapfile -t files < dist/verified-files.txt
+          paths=()
+          for file in "${files[@]}"; do paths+=("dist/$file"); done
+          case "$state" in
+            create) gh release create "$RELEASE_TAG" --verify-tag --notes-file dist/promotion-notes.md "${flags[@]}" "${paths[@]}" ;;
+            edit) gh release edit "$RELEASE_TAG" "${flags[@]}" ;;
+            accepted) echo 'Selected source and tested bytes are already published with the requested state.' ;;
+            *) echo 'Unknown release state; no write performed.' >&2; exit 1 ;;
+          esac
+          observed="$(python3 tools/promotion_state.py --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --commit "$EXPECTED_COMMIT" --directory dist --prerelease "$IS_PRERELEASE" --make-latest "$MAKE_LATEST")"
+          test "$observed" = accepted

@@ -130,31 +130,40 @@ class BridgeTests(unittest.TestCase):
             for fd in [a_master, a_slave, b_master, b_slave]:
                 os.close(fd)
 
-    def test_existing_native_c_abi_is_callable_without_ibus_or_fcitx(self):
+    def test_current_native_event_abi_is_callable_without_ibus_or_fcitx(self):
         if not shutil.which("cc"):
             self.skipTest("C compiler unavailable")
+        import json
         with tempfile.TemporaryDirectory() as td:
             t = Path(td)
-            mozc = t / "mozc"
+            mozc = t / "mozc" / "meltype_mozc_helper"
+            mozc.parent.mkdir()
             mozc.write_bytes(b"test")
+            empty = {"version": 1, "state": {}, "result": {"consumed": True, "commits": [], "view": None}}
+            reply = {"version": 1, "state": {}, "result": {"consumed": True,
+                     "commits": [{"removeBefore": None, "moveCaretBack": 0, "text": "日本語"}], "view": None}}
             c = t / "stub.c"
-            c.write_text('''#include <stdlib.h>
+            c.write_text(r'''#include <stdlib.h>
 #include <string.h>
-int meltype_init_mozc(const char* h, const char* p) { (void)h; (void)p; return 1; }
-void* meltype_create(void) { return malloc(1); }
-void meltype_destroy(void* p) { free(p); }
-void meltype_set_direct(void* p, int n) { (void)p; (void)n; }
-static int can_delete = -1;
-void meltype_set_can_delete(void* p, int n) { (void)p; can_delete = n; }
+#include <stdio.h>
+int meltype_init(const char* directory, const void* check) { (void)directory; (void)check; return 1; }
+void* meltype_ime_create(void) { return malloc(1); }
+void meltype_ime_destroy(void* p) { free(p); }
 void meltype_free(void* p) { free(p); }
-void* meltype_handle_key(void* p, int vk, int ch, int m, const char* b, const char* a) {
-  (void)p; (void)vk; (void)ch; (void)m; (void)b; (void)a;
-  if (can_delete != 0) return NULL;
-  const char *json = "{\\\"consumed\\\":true,\\\"commits\\\":[{\\\"deleteBefore\\\":0,\\\"text\\\":\\\"日本語\\\"}],\\\"view\\\":null}";
+void meltype_shutdown(void) {
+  const char* marker = getenv("MELTYPE_TEST_SHUTDOWN_MARKER");
+  if (!marker) return;
+  FILE* file = fopen(marker, "a");
+  if (file) { fputs("shutdown\n", file); fclose(file); }
+}
+void* meltype_ime_handle(void* p, const char* event) {
+  (void)p;
+  if (!strstr(event, "\"canRemove\": false") || !strstr(event, "\"instance\": \"tty\"")) return NULL;
+  const char *json = strstr(event, "JapaneseModeSelected") ? EMPTY_JSON : REPLY_JSON;
   char *r = malloc(strlen(json)+1); strcpy(r,json); return r;
 }
-void* meltype_commit(void* p) { return meltype_handle_key(p,0,0,0,NULL,NULL); }
-''')
+'''.replace('EMPTY_JSON', json.dumps(json.dumps(empty, ensure_ascii=False), ensure_ascii=False))
+   .replace('REPLY_JSON', json.dumps(json.dumps(reply, ensure_ascii=False), ensure_ascii=False)))
             so = t / "MeltypeNative.so"
             subprocess.run(["cc", "-shared", "-fPIC", "-o", str(so), str(c)], check=True)
             native = app.NativeSession(so, mozc)
@@ -162,6 +171,40 @@ void* meltype_commit(void* p) { return meltype_handle_key(p,0,0,0,NULL,NULL); }
                 self.assertEqual(app.InputBridge(native).feed(b"n"), "日本語".encode())
             finally:
                 native.close()
+            marker = t / "shutdown.txt"
+            # Two closed hosts and a later new host share the process runtime.
+            # Only process exit may flush learning/stop the conversion servers.
+            probe = """import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from meltype_tty import NativeSession
+for _ in range(3):
+    native = NativeSession(Path(sys.argv[2]), Path(sys.argv[3]))
+    native.close()
+    assert not Path(sys.argv[4]).exists(), 'session close shut down the shared runtime'
+"""
+            environment = {**os.environ, "MELTYPE_TEST_SHUTDOWN_MARKER": str(marker)}
+            subprocess.run([__import__('sys').executable, "-c", probe, str(SCRIPT.parent), str(so), str(mozc), str(marker)],
+                           env=environment, check=True)
+            self.assertEqual(marker.read_text(), "shutdown\n")
+
+    def test_host_candidate_selection_and_meaning_reach_the_existing_panel(self):
+        wire = {"consumed": True, "commits": [], "view": {"text": "日本語", "candidates": {
+                "items": ["日本語", "ニホンゴ"], "notes": [None, "根拠"],
+                "selected": 1, "selectedMeaning": "意味"}}}
+        result = app.session_result(wire)
+        self.assertEqual(app.effect_bytes(result, b"n"), b"")
+        self.assertEqual(result["view"]["candidates"], ["日本語", "ニホンゴ"])
+        self.assertEqual(result["view"]["selectedIndex"], 1)
+        self.assertEqual(result["view"]["notes"], [None, "根拠"])
+        self.assertEqual(result["view"]["meaning"], "意味")
+
+    def test_host_reconversion_and_caret_edits_stop_before_any_child_effect(self):
+        for unsupported in [{"removeBefore": "日本"}, {"moveCaretBack": 1}, {"deleteBefore": 2}]:
+            with self.subTest(edit=unsupported), self.assertRaises(app.UnsafeEffect):
+                app.session_result({"consumed": True, "commits": [
+                    {"text": "safe", "removeBefore": None, "moveCaretBack": 0},
+                    {"text": "replace", "removeBefore": None, "moveCaretBack": 0, **unsupported}], "view": None})
 
 
 if __name__ == "__main__":

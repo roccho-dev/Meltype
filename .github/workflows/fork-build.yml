@@ -1,6 +1,7 @@
 name: fork-build
 
-# この fork の Windows のビルド・テスト・配布 (zip とリリース)。upstream の build.yml は upstream の版のまま置き、
+# この fork の Windows 候補をビルド・テストする。公開は fork-publish.yml が検証済みの同じ bytes を使う。
+# upstream の build.yml は upstream の版のまま置き、
 # この fork では Actions の設定で止める (gh workflow disable build.yml)。
 on:
   push:
@@ -62,7 +63,12 @@ jobs:
 
       # Microsoft IME (日本語) や英語のスペルチェッカーが無い環境では、それらを使うテストは飛ばされる。
       - name: Test
-        run: dotnet run --project src/Meltype.Tests/Meltype.Tests.csproj -c Release --no-build
+        run: dotnet run --project src/Meltype.Windows.Tests/Meltype.Windows.Tests.csproj -c Release --no-build
+      - name: Candidate artifact contract tests
+        run: |
+          python -m unittest discover -s tools -p test_windows_portable.py -v
+          python -m unittest discover -s tools -p test_candidate_manifest.py -v
+          python -m unittest discover -s tools -p test_promotion_state.py -v
 
   # OS に依存しない部分 (Meltype.Core) を Linux と Mac でもテストする (Mac 版・Linux 版の土台)。
   core:
@@ -85,7 +91,6 @@ jobs:
   # Mozc の変換ヘルパー (native/mozc) をビルドする。初回は 30〜40 分かかるので、配布用の zip を作るとき
   # (タグ・手動実行) と、ヘルパーのソースを変えたときだけ。Bazel の結果はキャッシュして次から速くする。
   mozc:
-    if: github.event_name != 'pull_request'
     runs-on: windows-2022
     timeout-minutes: 90
     outputs:
@@ -99,7 +104,7 @@ jobs:
         id: check
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_EVENT_NAME" == pull_request ]]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           elif [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || git diff --name-only "$BEFORE" "$GITHUB_SHA" -- native/mozc .github/workflows/fork-build.yml | grep -q .; then
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -145,14 +150,13 @@ jobs:
           retention-days: 7
 
   package:
-    # タグ (v0.1.0 など) を push したら、テスト版の zip を作ってリリースに添付する。
-    # Actions の画面から手動で実行 (Run workflow) したら、zip を実行結果 (Artifacts) に置く。
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # PR でも実配布物を検査する。タグの push でもここでは公開しない。
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     needs: [test, mozc]
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -165,25 +169,22 @@ jobs:
         with:
           name: mozc-helper
           path: native/mozc/bin/
-      # コード署名の証明書 (秘密 SIGN_PFX_BASE64 = .pfx を Base64 にしたもの、SIGN_PASSWORD) があれば、Build-Package.ps1 が署名する
-      - name: Signing certificate
+      - name: Fetch Zenzai
         shell: powershell
-        env:
-          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
-        run: |
-          if ($env:SIGN_PFX_BASE64) {
-            $pfx = Join-Path $env:RUNNER_TEMP 'meltype-sign.pfx'
-            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
-            "MELTYPE_SIGN_PFX=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          }
+        run: .\native\zenzai\Get-Zenzai.ps1
       - name: Package
-        shell: powershell
-        env:
-          MELTYPE_SIGN_PASSWORD: ${{ secrets.SIGN_PASSWORD }}
-        # タグ (v1.0.0) なら Meltype-1.0.0-windows.zip、手動実行ならテスト版の名前 (Meltype-test-<日時>.zip)
+        id: version
+        shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME.Substring(1) } else { '' }
+          $version = ([xml](Get-Content -LiteralPath src/Meltype.Windows/Meltype.Windows.csproj)).Project.PropertyGroup.Version
+          "version=$version" >> $env:GITHUB_OUTPUT
           .\Build-Package.ps1 -Version $version
+          .\Build-Package.ps1 -Version $version -Portable -ReuseBuild
+      - name: Verify actual managed portable execution
+        shell: pwsh
+        env:
+          CANDIDATE_VERSION: ${{ steps.version.outputs.version }}
+        run: .\tools\Test-WindowsPortable.ps1 -Archive "dist/Meltype-$env:CANDIDATE_VERSION-windows-portable.zip" -Version $env:CANDIDATE_VERSION
       # タグの版と、ビルドした Meltype.exe の版 (ProductVersion の + より前) が同じか。違うまま出すと、
       # 自動更新が「新しい版がある」と同じ版を取り直し続けるので、出さない。
       # タグを付ける前に、手動実行の入力 tag で同じ確かめを試せる (gh workflow run fork-build.yml --ref <branch> -f tag=v1.2.1.2)。
@@ -196,25 +197,32 @@ jobs:
         run: |
           $expected = $env:TAG -replace '^v', ''
           $actual = ((Get-Item -LiteralPath 'dist\Meltype\app\Meltype.exe').VersionInfo.ProductVersion -split '\+')[0]
-          if ($actual -ne $expected) { throw "タグの版 ($expected) と Meltype.exe の版 ($actual) が違います。src\Meltype\Meltype.csproj の <Version> を合わせてください。" }
+          if ($actual -ne $expected) { throw "タグの版 ($expected) と Meltype.exe の版 ($actual) が違います。src\Meltype.Windows\Meltype.Windows.csproj の <Version> を合わせてください。" }
       # 検出・検査不能の配布物は、Artifacts にもリリースにも公開しない。
       - name: Scan Windows package with Defender
         shell: powershell
         timeout-minutes: 15
         run: |
           $packages = @(Get-ChildItem -LiteralPath dist -Filter 'Meltype-*.zip' -File)
-          if ($packages.Count -ne 1) { throw 'Expected one Meltype-*.zip file but found ' + $packages.Count }
-          .\tools\Scan-WindowsPackage.ps1 -Path @('.\dist\Meltype', $packages[0].FullName)
+          if ($packages.Count -ne 2) { throw 'Expected normal and portable archives but found ' + $packages.Count }
+          .\tools\Scan-WindowsPackage.ps1 -Path (@('.\dist\Meltype', '.\dist\Meltype-portable') + @($packages.FullName))
+      - name: Bind source and tested artifact bytes
+        shell: pwsh
+        env:
+          CANDIDATE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $commit = git rev-parse HEAD
+          python tools/candidate_manifest.py create --manifest dist/windows-candidate.json --directory dist --repository $env:GITHUB_REPOSITORY --commit $commit --version $env:CANDIDATE_VERSION --kind windows
+          if ($LASTEXITCODE -ne 0) { throw 'candidate source/bytes binding failed' }
       # この fork の GitHub Actions でビルドしたことの証明 (gh attestation verify <zip> --repo roccho-dev/Meltype で確かめられる)
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name != 'pull_request'
         with:
-          subject-path: dist/Meltype-*
+          subject-path: dist/Meltype-*.zip
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: meltype-package
-          path: dist/Meltype-*.zip
-          retention-days: 14
-      - if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
-        with:
-          files: dist/Meltype-*.zip
+          name: meltype-windows-candidate
+          path: |
+            dist/Meltype-*.zip
+            dist/windows-candidate.json
+          retention-days: 30

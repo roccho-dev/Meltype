@@ -15,15 +15,19 @@ not silently painted beyond the image. This does not promise every long meaning
 or URL fits at every terminal size; actual reference scanouts are checked apart
 from byte-exact selection and child effects.
 
-## Adopted main compatibility
+## 上流との互換性
 
-The shared SessionResult encoder is the main encoder: one `notes` array,
-positioned by candidate count, and the existing optional `expect` on text edits.
-The TTY does not reinterpret `expect` as permission to erase child-owned text.
-It uses main's `meltype_set_can_delete(..., 0)` before input, retaining atomic
-rejection of any unsupported deletion that nevertheless reaches the boundary.
-A matching NativeAOT artifact is required; an older library without that API
-is not substituted. The original Proposal port and lifetime/cancel rules remain.
+TTY は上流 v1.6.0 の `ImeHost` と同じ出来事のプロトコルを使います。
+`meltype_ime_create` で作った本体へ、版 1・インスタンス `tty` の出来事を送り、
+候補・選択・意味・注記をそのまま既存の候補パネルに表示します。
+通常入力とプレビューは別の本体を使い、プレビューで通常入力を確定しません。
+
+出来事には常に `CanRemove = false` を付けます。応答に前の文字の削除
+(`removeBefore`) やキャレット移動 (`moveCaretBack`) が含まれた場合も、
+子 PTY に何かを書く前に止めます。削除する文字が分かっていても、子の編集能力が
+観測できたことにはしません。同じソースから作った NativeAOT の成果物が必要で、
+前の `meltype_handle_key` 等の API を持つライブラリには差し替えません。
+Proposal の世代・入力先・取り消し・一度だけの選択という条件は維持します。
 
 The ordinary Linux artifact keeps main's IBus/fcitx5 products and all their
 existing tests. B's Nix output selects only NativeAOT, Mozc, TTY and notices

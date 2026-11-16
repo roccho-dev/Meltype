@@ -9,21 +9,32 @@ enum MacUserDictionary {
         var errorDescription: String? { "読みと単語を含むmacOSユーザー辞書のplistを選んでください。" }
     }
 
+    /// ファイルを選ぶ画面と、取り込めなかったときに出す書き出し方の案内。
+    static let exportGuide = "入力メニューの「ユーザ辞書を編集…」で取り込みたい単語を選び、右クリックの「書き出す…」で保存した「ユーザ辞書.plist」を選んでください。"
+
     static func entries(from data: Data) throws -> [(String, String)] {
-        let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        try parsedEntries(from: data).entries
+    }
+
+    private static func parsedEntries(from data: Data) throws -> (entries: [(String, String)], skipped: Int) {
+        let plist = try PropertyListSerialization.propertyList(from: data, options: PropertyListSerialization.ReadOptions(), format: nil)
         let rows = (plist as? [[String: Any]]) ?? (plist as? [String: Any])?["UserDictionary"] as? [[String: Any]] ?? []
         let entries = rows.compactMap { row -> (String, String)? in
             guard let raw = (row["reading"] ?? row["shortcut"]) as? String,
                   let phrase = (row["phrase"] ?? row["word"]) as? String else { return nil }
             let reading = (raw.applyingTransform(.hiraganaToKatakana, reverse: true) ?? raw).trimmingCharacters(in: .whitespacesAndNewlines)
             let word = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard reading.utf16.count >= 2, !word.isEmpty,
-                  !reading.contains(where: { $0 == "\t" || $0 == "\n" || $0 == "\r" }),
-                  !word.contains(where: { $0 == "\t" || $0 == "\n" || $0 == "\r" }) else { return nil }
+            guard !reading.isEmpty, !word.isEmpty,
+                  !reading.unicodeScalars.contains(where: isControl),
+                  !word.unicodeScalars.contains(where: isControl) else { return nil }
             return (reading, word)
         }
         guard !entries.isEmpty else { throw ImportError.unsupported }
-        return entries
+        return (entries, rows.count - entries.count)
+    }
+
+    private static func isControl(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value <= 0x1F || (0x7F...0x9F).contains(scalar.value)
     }
 
     static func merge(_ entries: [(String, String)], into existing: String) -> (String, Int) {
@@ -38,8 +49,9 @@ enum MacUserDictionary {
         return (existing + separator + lines.joined(separator: "\n") + "\n", lines.count)
     }
 
-    static func importFile(_ source: URL, directory: String) throws -> Int {
-        let entries = try entries(from: Data(contentsOf: source))
+    static func importFile(_ source: URL, directory: String) throws -> (added: Int, skipped: Int) {
+        let parsed = try parsedEntries(from: Data(contentsOf: source))
+        let entries = parsed.entries
         let folder = URL(fileURLWithPath: directory, isDirectory: true)
         let destination = folder.appendingPathComponent("userdict.txt")
         let exists = FileManager.default.fileExists(atPath: destination.path)
@@ -49,6 +61,6 @@ enum MacUserDictionary {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try merged.write(to: destination, atomically: true, encoding: .utf8)
         }
-        return count
+        return (count, parsed.skipped + entries.count - count)
     }
 }

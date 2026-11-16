@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Yukishiro
 
+using System.Globalization;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -45,8 +46,7 @@ internal static class Performance
         CompositionTests.Detector.SpellChecker ??= Detection.BuiltInWordChecker.Shared;
 
         var mozc = Henkan.Engine;
-        IKanjiConverter? inner = mozc ?? Henkan.FallbackConverter;
-        var converter = inner is null ? null : new TimedConverter(inner);
+        var converter = mozc is null ? null : new TimedConverter(mozc);
         var more = mozc is null ? null : new TimedCandidates(mozc.Candidates);
         CompositionTests.Keyboard Keyboard() => new(live: true, converter: converter, moreCandidates: more is null ? null : more.Lookup,
             userDictionary: new UserDictionary(null), translations: Henkan.TranslationDictionary);
@@ -261,7 +261,7 @@ internal static class Performance
         return number;
     }
 
-    private static string Format(double? value) => value is { } v ? v.ToString(v != 0 && Math.Abs(v) < 1 ? "F4" : "F2") : "-";
+    private static string Format(double? value) => value is { } v ? v.ToString(v != 0 && Math.Abs(v) < 1 ? "F4" : "F2", CultureInfo.InvariantCulture) : "-";
 
     public sealed record Distribution(int Count, double Mean, double P50, double P95, double P99, double Max);
 
